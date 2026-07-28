@@ -1,0 +1,4 @@
+allowBuilds:
+  # canvas is an optional Node-only dependency; the browser prototype does not use it.
+  canvas: false
+  esbuild: true

@@ -1,0 +1,9 @@
+node_modules/
+node_modules.shared-link
+dist/
+output/
+.vercel/
+tmp/
+*.tsbuildinfo
+vite.config.js
+vite.config.d.ts

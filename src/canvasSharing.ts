@@ -11,7 +11,7 @@ export type SharedCanvasLoadResult =
   | { status: 'ready'; snapshot: SharedCanvasSnapshot }
   | { status: 'missing' | 'invalid' }
 
-const CANVAS_SHARE_PREFIX = 'mango-canvas-share:'
+const CANVAS_SHARE_PREFIX = 'node-canvas-share:'
 const INLINE_SNAPSHOT_PARAM = 'snapshot'
 
 function stableToken(value: string) {

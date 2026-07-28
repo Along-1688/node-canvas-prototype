@@ -254,7 +254,7 @@ export interface VideoEditPreviewResult {
 }
 
 export type VideoOperationResult =
-  | { operation: 'super-resolution'; model: 'mango' | 'topaz'; scale?: 2 | 4 }
+  | { operation: 'super-resolution'; model: 'base' | 'topaz'; scale?: 2 | 4 }
   | { operation: 'frame-interpolation'; targetFps: 50 | 60 | 90 | 120 }
   | { operation: 'subtitle-removal' }
   | {

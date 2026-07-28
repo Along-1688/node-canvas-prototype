@@ -68,7 +68,7 @@ describe('canvas sharing', () => {
 
   it('rejects missing and malformed snapshots', () => {
     expect(loadCanvasShareSnapshot(window.localStorage, '#share/canvas/not-found')).toEqual({ status: 'missing' })
-    window.localStorage.setItem('mango-canvas-share:broken', '{')
+    window.localStorage.setItem('node-canvas-share:broken', '{')
     expect(loadCanvasShareSnapshot(window.localStorage, '#share/canvas/broken')).toEqual({ status: 'invalid' })
   })
 

@@ -262,7 +262,7 @@ const videoOperationCopy: Record<VideoOperation, string> = {
 }
 
 function defaultVideoOperationResult(operation: Exclude<VideoOperation, 'lip-sync'>): VideoOperationResult {
-  if (operation === 'super-resolution') return { operation, model: 'mango' }
+  if (operation === 'super-resolution') return { operation, model: 'base' }
   if (operation === 'frame-interpolation') return { operation, targetFps: 50 }
   if (operation === 'subtitle-removal') return { operation }
   return { operation: 'edit', selectedTime: 0.5, prompt: '' }
@@ -274,7 +274,7 @@ function videoModelLabel(modelId: string | undefined) {
 }
 
 function videoOperationSummary(result: VideoOperationResult) {
-  if (result.operation === 'super-resolution') return `${videoOperationCopy[result.operation]} · ${result.model === 'topaz' ? `Topaz ${result.scale ?? 2}x` : '芒果模型'}`
+  if (result.operation === 'super-resolution') return `${videoOperationCopy[result.operation]} · ${result.model === 'topaz' ? `Topaz ${result.scale ?? 2}x` : '基础模型'}`
   if (result.operation === 'frame-interpolation') return `${videoOperationCopy[result.operation]} · ${result.targetFps}fps`
   if (result.operation === 'lip-sync') return `${videoOperationCopy[result.operation]} · ${result.personLabel} · ${result.source === 'ai' ? 'AI 配音' : '本地配音'}`
   if (result.operation === 'edit') return `${videoOperationCopy[result.operation]} · ${result.prompt || '画面修改'}`
@@ -503,12 +503,12 @@ function SharedVideoPage({ result }: { result: SharedVideoLoadResult }) {
   const snapshot = result.status === 'ready' ? result.snapshot : undefined
   useEffect(() => {
     const previousTitle = document.title
-    document.title = snapshot ? `${snapshot.title} · 芒果灵创` : '分享视频不可用 · 芒果灵创'
+    document.title = snapshot ? `${snapshot.title} · 节点式画布` : '分享视频不可用 · 节点式画布'
     return () => { document.title = previousTitle }
   }, [snapshot])
   const canvasUrl = `${window.location.pathname}${window.location.search}`
   return <main className="shared-video-page">
-    <header><span><Sparkles size={17} /><strong>芒果灵创</strong></span><a href={canvasUrl}>返回画布</a></header>
+    <header><span><Sparkles size={17} /><strong>节点式画布</strong></span><a href={canvasUrl}>返回画布</a></header>
     {snapshot ? <section className="shared-video-viewer">
       <video src={snapshot.media.url} poster={snapshot.media.posterUrl} controls autoPlay={false} preload="metadata" playsInline aria-label={`${snapshot.title}分享播放器`} />
       <footer><div><strong>{snapshot.title}</strong><span>{snapshot.media.width && snapshot.media.height ? `${snapshot.media.width} × ${snapshot.media.height}` : '视频'} · {Math.round(snapshot.media.duration ?? 0)}s</span></div>{snapshot.allowDownload && <a href={snapshot.media.url} download><Download size={15} />下载视频</a>}</footer>
@@ -564,7 +564,7 @@ function SharedCanvasPage({ result }: { result: SharedCanvasLoadResult }) {
 
   useEffect(() => {
     const previousTitle = document.title
-    document.title = canvas ? `${canvas.name} · 芒果灵创` : '分享画布不可用 · 芒果灵创'
+    document.title = canvas ? `${canvas.name} · 节点式画布` : '分享画布不可用 · 节点式画布'
     return () => { document.title = previousTitle }
   }, [canvas])
 
@@ -588,7 +588,7 @@ function SharedCanvasPage({ result }: { result: SharedCanvasLoadResult }) {
   const canvasUrl = `${window.location.pathname}${window.location.search}`
   return <main className="shared-canvas-page">
     <header>
-      <span><Sparkles size={17} /><strong>芒果灵创</strong><i>/</i><b>{canvas?.name ?? '分享画布'}</b><small>只读模式，如需创建请点击</small></span>
+      <span><Sparkles size={17} /><strong>节点式画布</strong><i>/</i><b>{canvas?.name ?? '分享画布'}</b><small>只读模式，如需创建请点击</small></span>
       <div><a href={canvasUrl}>返回画布</a>{canvas && <button type="button" onClick={cloneCanvas}><Copy size={15} />复制项目</button>}</div>
     </header>
     {canvas && bounds ? <section className="shared-canvas-viewport" aria-label={`${canvas.name}分享预览`}>
@@ -1074,7 +1074,7 @@ function initialCanvas(): CanvasDocument {
   }
 }
 
-const CANVAS_HANDOFF_PREFIX = 'mango-canvas-handoff:'
+const CANVAS_HANDOFF_PREFIX = 'node-canvas-handoff:'
 
 function initialWorkspace() {
   const url = new URL(window.location.href)
@@ -3802,7 +3802,7 @@ function CanvasPrototype() {
       <main className="prototype-shell">
         <header className="canvas-topbar">
           <div className="canvas-identity">
-            <div className="brand-lockup" aria-label="芒果灵创"><span>芒果</span><span>灵创</span></div>
+            <div className="brand-lockup" aria-label="节点式画布"><span>节点</span><span>画布</span></div>
             <button
               ref={canvasMenuButtonRef}
               type="button"
@@ -3818,7 +3818,7 @@ function CanvasPrototype() {
           <div className="canvas-status"><button type="button" className="credit-pill"><span className="chestnut-dot" />生产栗 <strong>681</strong></button><div className="share-entry"><button type="button" className="share-button ui-tooltip-control share-tooltip" data-tooltip="发布与分享" onClick={() => setShareMenuOpen((current) => !current)}><Share2 size={16} />分享</button>{shareMenuOpen && <section className="share-menu" role="menu" aria-label="发布与分享"><strong>发布与分享</strong><button type="button" role="menuitem" onClick={openShareLink}><span><Link2 size={18} /></span><p><b>分享链接</b><small>拥有此链接的人可以查看并复制你的画布。</small></p></button></section>}</div></div>
         </header>
 
-        {shareDialogOpen && <div className="share-dialog-layer" data-canvas-overlay="true" onMouseDown={() => setShareDialogOpen(false)}><section className="share-dialog" role="dialog" aria-modal="true" aria-label="分享链接" onMouseDown={(event) => event.stopPropagation()}><header><strong>分享链接</strong><button type="button" onClick={() => setShareDialogOpen(false)} aria-label="关闭分享链接"><X size={18} /></button></header><div className="share-dialog-link"><input value={shareLink} readOnly aria-label="分享链接地址" /><button type="button" onClick={async () => { try { await copyCanvasShareLink(shareLink); notify('链接已复制') } catch { notify('复制失败，请检查浏览器权限') } }}><Copy size={15} />复制链接</button></div><div className="share-dialog-access"><strong>访问权限设置</strong><label><span>选择范围</span><select value={shareAccess} onChange={(event) => { const next = event.target.value as 'public' | 'private'; setShareAccess(next); if (next === 'private') { const token = canvasShareTokenFromHash(new URL(shareLink).hash); if (token) window.localStorage.removeItem(`mango-canvas-share:${token}`) } }}><option value="public">公开访问</option><option value="private">仅自己可见</option></select></label>{shareAccess === 'private' && <small>已撤销外部访问，已有链接不可继续查看。</small>}</div></section></div>}
+        {shareDialogOpen && <div className="share-dialog-layer" data-canvas-overlay="true" onMouseDown={() => setShareDialogOpen(false)}><section className="share-dialog" role="dialog" aria-modal="true" aria-label="分享链接" onMouseDown={(event) => event.stopPropagation()}><header><strong>分享链接</strong><button type="button" onClick={() => setShareDialogOpen(false)} aria-label="关闭分享链接"><X size={18} /></button></header><div className="share-dialog-link"><input value={shareLink} readOnly aria-label="分享链接地址" /><button type="button" onClick={async () => { try { await copyCanvasShareLink(shareLink); notify('链接已复制') } catch { notify('复制失败，请检查浏览器权限') } }}><Copy size={15} />复制链接</button></div><div className="share-dialog-access"><strong>访问权限设置</strong><label><span>选择范围</span><select value={shareAccess} onChange={(event) => { const next = event.target.value as 'public' | 'private'; setShareAccess(next); if (next === 'private') { const token = canvasShareTokenFromHash(new URL(shareLink).hash); if (token) window.localStorage.removeItem(`node-canvas-share:${token}`) } }}><option value="public">公开访问</option><option value="private">仅自己可见</option></select></label>{shareAccess === 'private' && <small>已撤销外部访问，已有链接不可继续查看。</small>}</div></section></div>}
 
         <AnchoredPopover anchorRef={canvasMenuButtonRef} open={canvasMenuOpen} onClose={() => { setCanvasMenuOpen(false); setCanvasActionsId(null) }} className="canvas-switcher-menu" align="start">
           <header><strong>画布</strong><button type="button" onClick={createCanvas} aria-label="新建画布" title="新建画布"><Plus size={16} /></button></header>

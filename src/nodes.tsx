@@ -1215,7 +1215,7 @@ function GeneratedImagePrompt({ id, data }: { id: string; data: CanvasNodeData }
         <PromptAssetTray assets={data.promptAssets} onRemove={(assetId) => updateNode(id, { promptAssets: (data.promptAssets ?? []).filter((asset) => asset.id !== assetId) })} />
         <div ref={promptEditorRef} className={`prompt-rich-editor ${draft.trim() ? '' : 'is-empty'}`} role="textbox" aria-label="图片 Prompt" aria-multiline="true" contentEditable suppressContentEditableWarning onInput={syncPromptEditor}>{promptContent}</div>
         <span className="video-prompt-count">{draft.length} / 3000</span>
-        {params.webSearch && <span className="search-mock-badge" title="来源：Mango 素材库、公开摄影集、城市光影样例" aria-label="Mock 资料 3 条，来源为 Mango 素材库、公开摄影集和城市光影样例"><Globe2 size={12} />Mock 资料 3 条</span>}
+        {params.webSearch && <span className="search-mock-badge" title="来源：示例素材库、公开摄影集、城市光影样例" aria-label="Mock 资料 3 条，来源为示例素材库、公开摄影集和城市光影样例"><Globe2 size={12} />Mock 资料 3 条</span>}
         <QuickReferenceMenu open={quickReferenceOpen} onClose={() => setQuickReferenceOpen(false)} onSelect={selectPromptAsset} />
       </div>
       <footer className="image-config-footer generation-config-footer">
@@ -1855,7 +1855,7 @@ function VideoOperationConfig({ id, data }: { id: string; data: CanvasNodeData }
   const copy = videoOperationLabels[operationData.operation]
   const sourceSuperResolution = operationData.operation === 'super-resolution' ? operationData : undefined
   const sourceInterpolation = operationData.operation === 'frame-interpolation' ? operationData : undefined
-  const [model, setModel] = useState<'mango' | 'topaz'>(sourceSuperResolution?.model ?? 'mango')
+  const [model, setModel] = useState<'base' | 'topaz'>(sourceSuperResolution?.model ?? 'base')
   const [scale, setScale] = useState<2 | 4>(sourceSuperResolution?.scale ?? 2)
   const [targetFps, setTargetFps] = useState<50 | 60 | 90 | 120>(sourceInterpolation?.targetFps ?? 50)
   const complete = () => {
@@ -1866,7 +1866,7 @@ function VideoOperationConfig({ id, data }: { id: string; data: CanvasNodeData }
   return (
     <section className={`video-operation-config node-panel zoom-stable-ui nodrag nowheel operation-${operationData.operation}`} aria-label={`${copy.title}配置`}>
       <header><span><strong>{copy.title}</strong><small>{copy.description}</small></span><button type="button" aria-label={`取消${copy.title}`} title="取消" onClick={() => actions.cancelPendingVideoOperation ? actions.cancelPendingVideoOperation(id) : actions.notify('可使用撤销取消本次处理')}><X size={15} /></button></header>
-      {operationData.operation === 'super-resolution' && <><div className="video-model-segments" role="group" aria-label="选择超分模型"><button type="button" className={model === 'mango' ? 'active' : ''} onClick={() => setModel('mango')}>芒果模型 · 视频超分</button><button type="button" className={model === 'topaz' ? 'active' : ''} onClick={() => setModel('topaz')}>Topaz Labs</button></div><p className="video-operation-note">当前分辨率：<strong>{data.media?.width ?? 1248} × {data.media?.height ?? 1664}</strong></p>{model === 'topaz' && <div className="video-scale-options"><span>超清倍数</span>{([2, 4] as const).map((value) => <button type="button" key={value} className={scale === value ? 'active' : ''} onClick={() => setScale(value)}>{value}x</button>)}</div>}</>}
+      {operationData.operation === 'super-resolution' && <><div className="video-model-segments" role="group" aria-label="选择超分模型"><button type="button" className={model === 'base' ? 'active' : ''} onClick={() => setModel('base')}>基础模型 · 视频超分</button><button type="button" className={model === 'topaz' ? 'active' : ''} onClick={() => setModel('topaz')}>Topaz Labs</button></div><p className="video-operation-note">当前分辨率：<strong>{data.media?.width ?? 1248} × {data.media?.height ?? 1664}</strong></p>{model === 'topaz' && <div className="video-scale-options"><span>超清倍数</span>{([2, 4] as const).map((value) => <button type="button" key={value} className={scale === value ? 'active' : ''} onClick={() => setScale(value)}>{value}x</button>)}</div>}</>}
       {operationData.operation === 'frame-interpolation' && <div className="video-fps-panel"><div><strong>目标帧率</strong><small>帧率越高，画面越流畅</small></div><div role="group" aria-label="目标帧率">{([50, 60, 90, 120] as const).map((fps) => <button type="button" key={fps} className={targetFps === fps ? 'active' : ''} onClick={() => setTargetFps(fps)}>{fps}fps</button>)}</div></div>}
       {operationData.operation === 'subtitle-removal' && <div className="subtitle-removal-summary"><span><CaptionsOff size={20} /></span><p><strong>智能检测字幕区域</strong><small>将从当前视频节点识别硬字幕，并生成无字幕版本。</small></p><Check size={16} /></div>}
       <footer><span className="generation-cost"><span className="chestnut-dot" />{videoOperationCost(operationData.operation)}</span><button type="button" className="video-primary-action" onClick={complete}>立即生成</button></footer>

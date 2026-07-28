@@ -17,7 +17,7 @@ export type SharedVideoLoadResult =
   | { status: 'ready'; snapshot: SharedVideoSnapshot }
   | { status: 'missing' | 'expired' | 'invalid' }
 
-const VIDEO_SHARE_PREFIX = 'mango-video-share:'
+const VIDEO_SHARE_PREFIX = 'node-canvas-video-share:'
 
 export function stableShareToken(value: string) {
   let hash = 2166136261

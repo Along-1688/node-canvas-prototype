@@ -82,6 +82,7 @@ import {
 } from './imageOperations'
 import { generationDefinitions, videoModeOptions, videoModelCapabilities } from './mockData'
 import { fitMediaAspect, formatMediaResolution } from './mediaGeometry'
+import { mediaAsset } from './mediaAssets'
 import {
   mediaFileExtension,
   resolveVideoGenerationParams,
@@ -413,10 +414,10 @@ function assetUrl(data: CanvasNodeData) {
   if (data.media?.url && data.nodeType === 'image') return data.media.url
   if (data.nodeType === 'image' && data.imageOperation?.editorComposition?.renderedDataUrl) return data.imageOperation.editorComposition.renderedDataUrl
   if (data.media?.posterUrl) return data.media.posterUrl
-  if (data.mediaVariant === 'ip') return '/assets/virtual-ip-portrait.jpg'
-  if (data.mediaVariant === 'anime') return '/assets/generated-anime.png'
-  if (data.mediaVariant === 'poster') return '/assets/text-poster.png'
-  return '/assets/asset-dog.png'
+  if (data.mediaVariant === 'ip') return mediaAsset('virtual-ip-portrait.jpg')
+  if (data.mediaVariant === 'anime') return mediaAsset('generated-anime.png')
+  if (data.mediaVariant === 'poster') return mediaAsset('text-poster.png')
+  return mediaAsset('asset-dog.png')
 }
 
 function imageDownloadSource(data: CanvasNodeData) {
@@ -435,10 +436,10 @@ function promptAssetUrl(asset: PromptAssetReference) {
 function referenceAssetUrl(reference: NodeReference) {
   if (reference.media?.posterUrl) return reference.media.posterUrl
   if (reference.media?.url && reference.nodeType === 'image') return reference.media.url
-  if (reference.mediaVariant === 'ip') return '/assets/virtual-ip-portrait.jpg'
-  if (reference.mediaVariant === 'anime' || reference.nodeType === 'video') return '/assets/generated-anime.png'
-  if (reference.mediaVariant === 'poster') return '/assets/text-poster.png'
-  return '/assets/asset-dog.png'
+  if (reference.mediaVariant === 'ip') return mediaAsset('virtual-ip-portrait.jpg')
+  if (reference.mediaVariant === 'anime' || reference.nodeType === 'video') return mediaAsset('generated-anime.png')
+  if (reference.mediaVariant === 'poster') return mediaAsset('text-poster.png')
+  return mediaAsset('asset-dog.png')
 }
 
 function InteractionCandidateBadge({ id, type }: { id: string; type: CanvasNodeData['nodeType'] }) {
@@ -592,7 +593,7 @@ function VideoPlayer({ label, media, className = '', compact = false, seekTime }
       <video
         ref={videoRef}
         draggable={false}
-        src={media?.url ?? '/assets/virtual-ip-host-video.mp4'}
+        src={media?.url ?? mediaAsset('virtual-ip-host-video.mp4')}
         poster={media?.posterUrl}
         muted={muted}
         playsInline
@@ -1702,9 +1703,9 @@ function VideoReferenceSlot({ label, reference, onSelect }: { label: string; ref
 }
 
 const builtInSeedanceAssets = [
-  { id: 'seedance-host', title: '品牌主播 · 合规', type: 'image' as const, posterUrl: '/assets/virtual-ip-portrait.jpg' },
-  { id: 'seedance-city', title: '樱花城市 · 合规', type: 'image' as const, posterUrl: '/assets/generated-anime.png' },
-  { id: 'seedance-landscape', title: '横屏广告片 · 合规', type: 'video' as const, posterUrl: '/assets/demo-landscape-video-poster.jpg' },
+  { id: 'seedance-host', title: '品牌主播 · 合规', type: 'image' as const, posterUrl: mediaAsset('virtual-ip-portrait.jpg') },
+  { id: 'seedance-city', title: '樱花城市 · 合规', type: 'image' as const, posterUrl: mediaAsset('generated-anime.png') },
+  { id: 'seedance-landscape', title: '横屏广告片 · 合规', type: 'video' as const, posterUrl: mediaAsset('demo-landscape-video-poster.jpg') },
   { id: 'seedance-voice', title: '品牌女声 · 合规', type: 'audio' as const },
 ]
 
@@ -2164,7 +2165,7 @@ function VideoToolbar({ id, data, onExpand, onLipSync }: { id: string; data: Can
   const [moreOpen, setMoreOpen] = useState(false)
   const moreButtonRef = useRef<HTMLButtonElement>(null)
   const runOperation = (operation: VideoOperationKind) => { setMoreOpen(false); actions.prepareVideoOperation(id, operation) }
-  return <div className="video-toolbar media-toolbar zoom-stable-ui nodrag" role="toolbar" aria-label="视频节点工具"><IconAction label="视频超分" onClick={() => runOperation('super-resolution')}><MonitorUp size={15} /></IconAction><IconAction label="视频补帧" onClick={() => runOperation('frame-interpolation')}><Gauge size={15} /></IconAction><IconAction label="对口型" onClick={onLipSync}><ScanFace size={15} /></IconAction><IconAction label="视频编辑" onClick={() => runOperation('edit')}><Scissors size={15} /></IconAction><span className="toolbar-divider" /><div><IconAction buttonRef={moreButtonRef} label="更多视频工具" active={moreOpen} onClick={() => setMoreOpen((open) => !open)}><MoreHorizontal size={16} /></IconAction><AnchoredPopover anchorRef={moreButtonRef} open={moreOpen} onClose={() => setMoreOpen(false)} className="toolbar-menu video-more-menu" align="end"><div role="menu"><button type="button" onClick={(event) => { event.stopPropagation(); runOperation('subtitle-removal') }}><CaptionsOff size={14} />字幕擦除</button><button type="button" className="seedance-compliance-menu-item" onClick={(event) => { event.stopPropagation(); setMoreOpen(false); verifySeedance() }}><ShieldCheck size={14} />Seedance 2.0 合规验证</button></div></AnchoredPopover></div><span className="toolbar-divider" /><PinControl id={id} value={data.pinColor} /><MediaDownloadAction label="下载视频" filename={`${data.title}.${mediaFileExtension(data.media, 'video')}`} href={data.media?.url ?? '/assets/virtual-ip-host-video.mp4'}><Download size={15} /></MediaDownloadAction><IconAction label="全屏预览" onClick={onExpand}><Expand size={15} /></IconAction></div>
+  return <div className="video-toolbar media-toolbar zoom-stable-ui nodrag" role="toolbar" aria-label="视频节点工具"><IconAction label="视频超分" onClick={() => runOperation('super-resolution')}><MonitorUp size={15} /></IconAction><IconAction label="视频补帧" onClick={() => runOperation('frame-interpolation')}><Gauge size={15} /></IconAction><IconAction label="对口型" onClick={onLipSync}><ScanFace size={15} /></IconAction><IconAction label="视频编辑" onClick={() => runOperation('edit')}><Scissors size={15} /></IconAction><span className="toolbar-divider" /><div><IconAction buttonRef={moreButtonRef} label="更多视频工具" active={moreOpen} onClick={() => setMoreOpen((open) => !open)}><MoreHorizontal size={16} /></IconAction><AnchoredPopover anchorRef={moreButtonRef} open={moreOpen} onClose={() => setMoreOpen(false)} className="toolbar-menu video-more-menu" align="end"><div role="menu"><button type="button" onClick={(event) => { event.stopPropagation(); runOperation('subtitle-removal') }}><CaptionsOff size={14} />字幕擦除</button><button type="button" className="seedance-compliance-menu-item" onClick={(event) => { event.stopPropagation(); setMoreOpen(false); verifySeedance() }}><ShieldCheck size={14} />Seedance 2.0 合规验证</button></div></AnchoredPopover></div><span className="toolbar-divider" /><PinControl id={id} value={data.pinColor} /><MediaDownloadAction label="下载视频" filename={`${data.title}.${mediaFileExtension(data.media, 'video')}`} href={data.media?.url ?? mediaAsset('virtual-ip-host-video.mp4')}><Download size={15} /></MediaDownloadAction><IconAction label="全屏预览" onClick={onExpand}><Expand size={15} /></IconAction></div>
 }
 
 export const VideoNode = memo(function VideoNode({ id, data, selected }: NodeProps<CanvasFlowNode>) {

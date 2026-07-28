@@ -29,6 +29,7 @@ import {
 import { allowedTargetsForSource, labelForType } from './domain'
 import { AnchoredPopover } from './floating'
 import { MediaTypeIcon, mediaNodeTypes, mediaTypeLabels } from './mediaTypes'
+import { mediaAsset } from './mediaAssets'
 import type { AssetFolder, CanvasFlowNode, CanvasGroup, CanvasPlaylist, DrawerKey, GenerationTask, MediaNodeType, SessionAsset } from './types'
 
 export type AuxiliaryTool = '播放列表' | '图片编辑器'
@@ -211,7 +212,7 @@ type AssetEntry = { id: string; title: string; type: '文本' | '图片' | '视�
 
 const assetEntries: AssetEntry[] = [
   { id: 'dog', title: '柴犬棚拍首帧', type: '图片', nodeType: 'image', className: 'asset-poster dog-poster', category: 'uncategorized', scope: 'personal' },
-  { id: 'anime', title: '主播探店视频', type: '视频', nodeType: 'video', className: 'asset-poster video-poster', posterUrl: '/assets/virtual-ip-host-video-poster.jpg', category: 'campaign', scope: 'project' },
+  { id: 'anime', title: '主播探店视频', type: '视频', nodeType: 'video', className: 'asset-poster video-poster', posterUrl: mediaAsset('virtual-ip-host-video-poster.jpg'), category: 'campaign', scope: 'project' },
   { id: 'audio', title: '环境氛围音', type: '音频', nodeType: 'audio', className: 'asset-poster audio-poster', category: 'campaign', scope: 'personal' },
 ]
 

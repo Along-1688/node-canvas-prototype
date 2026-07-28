@@ -102,6 +102,7 @@ import {
 import { nodeTypes } from './nodes'
 import { ContinuationMenu, DrawerPanel, QuickAddMenu } from './panels'
 import { MediaTypeIcon } from './mediaTypes'
+import { mediaAsset } from './mediaAssets'
 import { cloneMediaMetadata, HOST_VIDEO_MEDIA, imageMediaForVariant } from './mediaMetadata'
 import { batchMediaPosition } from './mediaGeometry'
 import {
@@ -484,7 +485,7 @@ function SaveAssetsDialog({ nodes, folders, onClose, onSave }: { nodes: CanvasFl
       <header><strong>保存资产</strong><button type="button" onClick={onClose} aria-label="关闭保存资产"><X size={18} /></button></header>
       <div className="asset-save-body">
         <div className="asset-save-previews">{nodes.map((node) => <article key={node.id}>
-          {node.data.nodeType === 'image' ? <img src={node.data.mediaVariant === 'ip' ? '/assets/virtual-ip-portrait.jpg' : node.data.mediaVariant === 'anime' ? '/assets/generated-anime.png' : node.data.mediaVariant === 'poster' ? '/assets/text-poster.png' : '/assets/asset-dog.png'} alt="" /> : <span className={`saved-preview saved-${node.data.nodeType}`}>{node.data.nodeType === 'text' ? (node.data.content ?? '文本').slice(0, 28) : node.data.nodeType === 'video' ? '视频' : '音频'}</span>}
+          {node.data.nodeType === 'image' ? <img src={node.data.mediaVariant === 'ip' ? mediaAsset('virtual-ip-portrait.jpg') : node.data.mediaVariant === 'anime' ? mediaAsset('generated-anime.png') : node.data.mediaVariant === 'poster' ? mediaAsset('text-poster.png') : mediaAsset('asset-dog.png')} alt="" /> : <span className={`saved-preview saved-${node.data.nodeType}`}>{node.data.nodeType === 'text' ? (node.data.content ?? '文本').slice(0, 28) : node.data.nodeType === 'video' ? '视频' : '音频'}</span>}
           <strong>{node.data.title}</strong>
         </article>)}</div>
         <div className="asset-save-fields">
@@ -2962,7 +2963,7 @@ function CanvasPrototype() {
     for (const node of selected) {
       const safeName = node.data.title.replace(/[\\/:*?"<>|]/g, '_')
       if (node.data.nodeType === 'image') {
-        const fallbackUrl = node.data.mediaVariant === 'ip' ? '/assets/virtual-ip-portrait.jpg' : node.data.mediaVariant === 'anime' ? '/assets/generated-anime.png' : node.data.mediaVariant === 'poster' ? '/assets/text-poster.png' : '/assets/asset-dog.png'
+        const fallbackUrl = node.data.mediaVariant === 'ip' ? mediaAsset('virtual-ip-portrait.jpg') : node.data.mediaVariant === 'anime' ? mediaAsset('generated-anime.png') : node.data.mediaVariant === 'poster' ? mediaAsset('text-poster.png') : mediaAsset('asset-dog.png')
         const url = node.data.media?.url ?? node.data.imageOperation?.editorComposition?.renderedDataUrl ?? fallbackUrl
         const renderedMime = url.match(/^data:([^;,]+)/)?.[1]
         const media = node.data.media ?? { url, mimeType: renderedMime }

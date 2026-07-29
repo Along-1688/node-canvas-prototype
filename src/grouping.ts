@@ -1,4 +1,21 @@
-import type { CanvasFlowEdge, CanvasFlowNode, CanvasGroup, CanvasRect } from './types'
+import type { CanvasFlowEdge, CanvasFlowNode, CanvasGroup, CanvasPlaylist, CanvasRect } from './types'
+
+const ORGANIZE_PLAYLIST_WIDTH = 720
+const ORGANIZE_PLAYLIST_MIN_WIDTH = 400
+const ORGANIZE_PLAYLIST_MAX_WIDTH = 1040
+const ORGANIZE_PLAYLIST_EMPTY_HEIGHT = 104
+const ORGANIZE_PLAYLIST_PREVIEW_GAP = 8
+const ORGANIZE_PLAYLIST_PREVIEW_ASPECT = 16 / 9
+
+function organizedPlaylistWidth(playlist: CanvasPlaylist) {
+  return Math.min(ORGANIZE_PLAYLIST_MAX_WIDTH, Math.max(ORGANIZE_PLAYLIST_MIN_WIDTH, Math.round(playlist.width ?? ORGANIZE_PLAYLIST_WIDTH)))
+}
+
+function organizedPlaylistHeight(playlist: CanvasPlaylist) {
+  return playlist.clips.length
+    ? ORGANIZE_PLAYLIST_EMPTY_HEIGHT + ORGANIZE_PLAYLIST_PREVIEW_GAP + organizedPlaylistWidth(playlist) / ORGANIZE_PLAYLIST_PREVIEW_ASPECT
+    : ORGANIZE_PLAYLIST_EMPTY_HEIGHT
+}
 
 export type FlowRect = CanvasRect
 export type GroupResizeCorner = 'nw' | 'ne' | 'sw' | 'se'
@@ -179,9 +196,10 @@ export function reconcileDraggedNodeGroups(
  * Member nodes keep their relative positions and every persisted group bound is
  * translated by the exact same delta, so "整理画布" cannot tear groups apart.
  */
-export function organizeCanvasLayout(nodes: CanvasFlowNode[], groups: CanvasGroup[]) {
+export function organizeCanvasLayout(nodes: CanvasFlowNode[], groups: CanvasGroup[], playlists: CanvasPlaylist[] = []) {
   const nextNodes = nodes.map((node) => ({ ...node, position: { ...node.position } }))
   const nextGroups = groups.map((group) => ({ ...group, bounds: { ...group.bounds }, nodeIds: [...group.nodeIds] }))
+  const nextPlaylists = playlists.map((playlist) => ({ ...playlist, position: { ...playlist.position }, clips: playlist.clips.map((clip) => ({ ...clip })) }))
   const nodeIndex = new Map(nextNodes.map((node, index) => [node.id, index]))
   const groupedIds = new Set(nextGroups.flatMap((group) => group.nodeIds))
   const rowLimit = 2300
@@ -209,10 +227,23 @@ export function organizeCanvasLayout(nodes: CanvasFlowNode[], groups: CanvasGrou
     rowHeight = Math.max(rowHeight, group.bounds.height)
   })
 
+  nextPlaylists.forEach((playlist) => {
+    const width = organizedPlaylistWidth(playlist)
+    const height = organizedPlaylistHeight(playlist)
+    if (cursorX > 90 && cursorX + width > rowLimit) {
+      cursorX = 90
+      cursorY += rowHeight + gap
+      rowHeight = 0
+    }
+    playlist.position = { x: cursorX, y: cursorY }
+    cursorX += width + gap
+    rowHeight = Math.max(rowHeight, height)
+  })
+
   const ungrouped = nextNodes.filter((node) => !groupedIds.has(node.id))
     .sort((left, right) => ['text', 'image', 'video', 'audio'].indexOf(left.data.nodeType) - ['text', 'image', 'video', 'audio'].indexOf(right.data.nodeType))
   cursorX = 90
-  cursorY = nextGroups.length ? cursorY + rowHeight + 150 : 150
+  cursorY = nextGroups.length || nextPlaylists.length ? cursorY + rowHeight + 150 : 150
   rowHeight = 0
   ungrouped.forEach((node) => {
     const size = nodeDimensions(node)
@@ -227,7 +258,7 @@ export function organizeCanvasLayout(nodes: CanvasFlowNode[], groups: CanvasGrou
     rowHeight = Math.max(rowHeight, size.height)
   })
 
-  return { nodes: nextNodes, groups: nextGroups }
+  return { nodes: nextNodes, groups: nextGroups, playlists: nextPlaylists }
 }
 
 export function pruneGroups(groups: CanvasGroup[], nodes: CanvasFlowNode[]) {

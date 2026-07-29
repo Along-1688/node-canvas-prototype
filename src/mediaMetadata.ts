@@ -1,35 +1,34 @@
 import type { CanvasNodeData, MediaMetadata } from './types'
-import { mediaAsset } from './mediaAssets'
 
 type ImageMediaVariant = Extract<CanvasNodeData['mediaVariant'], 'dog' | 'anime' | 'ip' | 'poster'>
 
 const imageMediaCatalog: Record<ImageMediaVariant, MediaMetadata> = {
-  anime: { url: mediaAsset('generated-anime.png'), mimeType: 'image/png', width: 1088, height: 608 },
-  dog: { url: mediaAsset('asset-dog.png'), mimeType: 'image/png', width: 1280, height: 720 },
-  poster: { url: mediaAsset('text-poster.png'), mimeType: 'image/png', width: 1280, height: 720 },
-  ip: { url: mediaAsset('virtual-ip-portrait.jpg'), mimeType: 'image/jpeg', width: 852, height: 1280 },
+  anime: { url: '/node-canvas-prototype/assets/generated-anime.png', mimeType: 'image/png', width: 1088, height: 608 },
+  dog: { url: '/node-canvas-prototype/assets/asset-dog.png', mimeType: 'image/png', width: 1280, height: 720 },
+  poster: { url: '/node-canvas-prototype/assets/text-poster.png', mimeType: 'image/png', width: 1280, height: 720 },
+  ip: { url: '/node-canvas-prototype/assets/virtual-ip-portrait.jpg', mimeType: 'image/jpeg', width: 852, height: 1280 },
 }
 
 export const HOST_VIDEO_MEDIA: MediaMetadata = {
-  url: mediaAsset('virtual-ip-host-video.mp4'),
-  posterUrl: mediaAsset('virtual-ip-host-video-poster.jpg'),
+  url: '/node-canvas-prototype/assets/virtual-ip-host-video.mp4',
+  posterUrl: '/node-canvas-prototype/assets/virtual-ip-host-video-poster.jpg',
   mimeType: 'video/mp4',
   width: 1248,
   height: 1664,
   duration: 8.055,
   hasAudio: true,
-  timelineFrameUrls: Array.from({ length: 5 }, (_, index) => mediaAsset(`virtual-ip-host-video-timeline-${String(index + 1).padStart(2, '0')}.jpg`)),
+  timelineFrameUrls: Array.from({ length: 5 }, (_, index) => `/node-canvas-prototype/assets/virtual-ip-host-video-timeline-${String(index + 1).padStart(2, '0')}.jpg`),
 }
 
 export const LANDSCAPE_VIDEO_MEDIA: MediaMetadata = {
-  url: mediaAsset('demo-landscape-video.mp4'),
-  posterUrl: mediaAsset('demo-landscape-video-poster.jpg'),
+  url: '/node-canvas-prototype/assets/demo-landscape-video.mp4',
+  posterUrl: '/node-canvas-prototype/assets/demo-landscape-video-poster.jpg',
   mimeType: 'video/mp4',
   width: 1280,
   height: 720,
   duration: 8.042,
   hasAudio: true,
-  timelineFrameUrls: Array.from({ length: 5 }, (_, index) => mediaAsset(`demo-landscape-video-timeline-${String(index + 1).padStart(2, '0')}.jpg`)),
+  timelineFrameUrls: Array.from({ length: 5 }, (_, index) => `/node-canvas-prototype/assets/demo-landscape-video-timeline-${String(index + 1).padStart(2, '0')}.jpg`),
 }
 
 export function cloneMediaMetadata(media: MediaMetadata): MediaMetadata {

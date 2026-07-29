@@ -1,7 +1,7 @@
 import { BaseEdge, EdgeLabelRenderer, getBezierPath, type EdgeProps } from '@xyflow/react'
 import { Trash2 } from 'lucide-react'
 import { useCanvasActions } from './canvasContext'
-import type { CanvasFlowEdge, ImageOperation, VideoOperation } from './types'
+import type { AudioOperation, CanvasFlowEdge, ImageOperation, VideoOperation } from './types'
 
 const operationLabels: Record<ImageOperation, string> = {
   crop: '裁剪',
@@ -25,6 +25,10 @@ const videoOperationLabels: Record<VideoOperation, string> = {
   'subtitle-removal': '字幕擦除',
   'lip-sync': '对口型',
   edit: '视频编辑',
+}
+
+const audioOperationLabels: Record<AudioOperation, string> = {
+  trim: '裁剪音频',
 }
 
 function FlowingEdgeStrand({ path, edgeId, sourceX, sourceY, targetX, targetY }: {
@@ -70,7 +74,9 @@ export function CanvasEdge(props: EdgeProps<CanvasFlowEdge>) {
     ? operationLabels[props.data.operation ?? 'prompt-regenerate']
     : props.data?.relationType === 'video-operation'
       ? videoOperationLabels[props.data.videoOperation ?? 'edit']
-    : props.data?.operation === 'prompt-regenerate'
+      : props.data?.relationType === 'audio-operation'
+        ? audioOperationLabels[props.data.audioOperation ?? 'trim']
+      : props.data?.operation === 'prompt-regenerate'
       ? '再次生成'
       : '生成参考'
 

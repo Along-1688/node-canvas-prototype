@@ -100,6 +100,13 @@ describe('marquee and group geometry', () => {
     expect(outside.position.y).toBeGreaterThan(result.groups[0].bounds.y + result.groups[0].bounds.height)
   })
 
+  it('includes playlists as independent layout units when organizing the canvas', () => {
+    const playlists = [{ id: 'playlist-a', name: '播放列表 A', position: { x: 980, y: 760 }, clips: [] }]
+    const result = organizeCanvasLayout([node('outside', 80, 900, 'text')], [], playlists)
+    expect(result.playlists[0].position).toEqual({ x: 90, y: 150 })
+    expect(result.nodes[0].position.y).toBeGreaterThan(150)
+  })
+
   it('automatically removes groups with fewer than two available nodes', () => {
     const groups: CanvasGroup[] = [{ id: 'g1', name: '组 1', nodeIds: ['a', 'b'], bounds: { x: -20, y: -42, width: 800, height: 360 } }]
     expect(pruneGroups(groups, [node('a', 0, 0)])).toEqual([])

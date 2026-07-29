@@ -103,8 +103,15 @@ export const generationDefinitions: GenerationDefinition[] = [
   {
     nodeType: 'audio',
     modes: [
-      { id: 'tts', label: '文本转语音', models: [{ id: 'voice-demo', label: '灵声音色（示例）', parameters: [{ id: 'speed', label: '语速', type: 'select', options: [{ label: '0.8×', value: 0.8 }, { label: '1.0×', value: 1 }, { label: '1.2×', value: 1.2 }], defaultValue: 1 }] }] },
-      { id: 'music', label: '生成配乐', models: [{ id: 'music-demo', label: '配乐模型（示例）', parameters: [{ id: 'duration', label: '时长', type: 'number', defaultValue: 15 }] }] },
+      {
+        id: 'audio-generate',
+        label: '音频生成',
+        models: [
+          { id: 'seed-audio-1', label: 'Seed Audio 1.0', parameters: [{ id: 'speed', label: '语速', type: 'select', options: [{ label: '0.8×', value: 0.8 }, { label: '1.0×', value: 1 }, { label: '1.2×', value: 1.2 }], defaultValue: 1 }] },
+          { id: 'mureka-9', label: 'Mureka-9', parameters: [{ id: 'musicType', label: '音乐类型', type: 'select', options: [{ label: '音乐', value: 'music' }, { label: '配乐', value: 'score' }], defaultValue: 'music' }, { id: 'lyricMode', label: '歌词模式', type: 'select', options: [{ label: '智能模式', value: 'smart' }, { label: '固定歌词', value: 'fixed' }, { label: '纯音乐', value: 'instrumental' }], defaultValue: 'smart' }] },
+          { id: 'minimax-speech-2.8', label: 'MiniMax Speech-2.8 HD', parameters: [{ id: 'voiceLabel', label: '音色', type: 'select', options: [{ label: '淡雅学姐', value: '淡雅学姐' }], defaultValue: '淡雅学姐' }] },
+        ],
+      },
     ],
   },
   {
@@ -248,6 +255,24 @@ export const initialNodes: CanvasFlowNode[] = [
       videoGeneration: { ratio: '16:9', resolution: '720p', count: 1, duration: 8, webSearch: false, generateAudio: true },
       duration: 8.042,
       media: cloneMediaMetadata(LANDSCAPE_VIDEO_MEDIA),
+    },
+  },
+  {
+    id: 'audio-node-welcome',
+    type: 'audio',
+    position: { x: 1010, y: 1060 },
+    data: {
+      nodeType: 'audio',
+      title: '节点式画布欢迎语',
+      status: 'success',
+      sourceKind: 'upload',
+      content: '欢迎来到节点式画布，你的 AI 创作助手。',
+      modeId: 'audio-generate',
+      modelId: 'seed-audio-1',
+      params: { speed: 1, voiceId: 'elegant-senior', voiceLabel: '淡雅学姐' },
+      duration: 3.816,
+      cost: 12,
+      media: { url: '/node-canvas-prototype/assets/node-canvas-welcome.mp3', mimeType: 'audio/mpeg', duration: 3.816, hasAudio: true },
     },
   },
   {

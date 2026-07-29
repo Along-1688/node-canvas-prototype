@@ -42,11 +42,8 @@ import {
   Bold,
   CaseUpper,
   Check,
-  ChevronLeft,
   ChevronDown,
-  ChevronRight,
   ChevronUp,
-  Clock3,
   Copy,
   Crop,
   Download,
@@ -76,7 +73,6 @@ import {
   Undo2,
   Upload,
   UserRound,
-  Video,
   WandSparkles,
   X,
 } from 'lucide-react'
@@ -86,10 +82,9 @@ import type {
   ImageEditorCommitPayload,
   ImageEditorCommitResult,
   ImageEditorComposition,
-  ImageEditorGenerateRequest,
   ImageEditorLayer,
-  VideoResolution,
 } from './types'
+import { ShinyText } from './ShinyText'
 import {
   collectCurrentSourceNodeIds,
   containScale,
@@ -107,7 +102,6 @@ export interface ImageEditorWorkspaceProps {
   initialComposition?: ImageEditorComposition
   onClose: () => void
   onSave: (payload: ImageEditorCommitPayload) => ImageEditorCommitResult | Promise<ImageEditorCommitResult>
-  onGenerate?: (request: ImageEditorGenerateRequest) => void | Promise<void>
 }
 
 type EditorTool = 'select' | 'brush' | 'eraser' | 'rectangle' | 'arrow' | 'pen' | 'text' | 'upload'
@@ -277,10 +271,6 @@ const DEFAULT_BACKGROUND = '#ffffff'
 const DEFAULT_COLOR = '#f0453d'
 const MAX_HISTORY = 50
 const EXPORT_SCALES = [0.5, 0.75, 1, 1.5, 2, 3]
-const VIDEO_DURATIONS = Array.from({ length: 12 }, (_, index) => index + 4)
-const VIDEO_RESOLUTIONS: VideoResolution[] = ['720p', '1080p']
-const VIDEO_ASPECT_RATIOS: ImageEditorAspectRatio[] = ['16:9', '9:16', '1:1', '4:3', '3:4']
-const VIDEO_ASPECT_RATIO_SET = new Set<ImageEditorAspectRatio>(VIDEO_ASPECT_RATIOS)
 const MIN_ZOOM = 0.1
 const MAX_ZOOM = 5
 const FIT_VIEWPORT_RATIO = 0.6
@@ -1149,7 +1139,6 @@ export function ImageEditorWorkspace({
   initialComposition,
   onClose,
   onSave,
-  onGenerate,
 }: ImageEditorWorkspaceProps) {
   const initialSize = useMemo(() => initialDimensions(source, initialComposition), [initialComposition, source])
   const rootRef = useRef<HTMLElement>(null)
@@ -1173,7 +1162,6 @@ export function ImageEditorWorkspace({
   const heightRef = useRef(initialSize.height)
   const aspectRatioRef = useRef<ImageEditorAspectRatio>(initialComposition?.aspectRatio || 'custom')
   const backgroundRef = useRef(initialComposition?.backgroundColor || DEFAULT_BACKGROUND)
-  const promptRef = useRef(initialComposition?.prompt || '')
   const toolRef = useRef<EditorTool>('select')
   const colorRef = useRef(DEFAULT_COLOR)
   const brushWidthRef = useRef(4)
@@ -1187,7 +1175,6 @@ export function ImageEditorWorkspace({
   const eraserQueueRef = useRef<Promise<void>>(Promise.resolve())
   const saveCompositionRef = useRef<(closeAfterSave?: boolean, closeBeforeSave?: boolean) => Promise<ImageEditorCommitResult | null>>(async () => null)
   const savingRef = useRef(false)
-  const generatingRef = useRef(false)
   const exportingRef = useRef(false)
   const cutoutObjectIdRef = useRef<string | null>(null)
   const cutoutOperationRef = useRef<Promise<void>>(Promise.resolve())
@@ -1225,7 +1212,6 @@ export function ImageEditorWorkspace({
   const [aspectRatio, setAspectRatioState] = useState<ImageEditorAspectRatio>(initialComposition?.aspectRatio || 'custom')
   const [ratioMenuOpen, setRatioMenuOpen] = useState(false)
   const [backgroundColor, setBackgroundColorState] = useState(initialComposition?.backgroundColor || DEFAULT_BACKGROUND)
-  const [prompt, setPromptState] = useState(initialComposition?.prompt || '')
   const [tool, setToolState] = useState<EditorTool>('select')
   const [color, setColorState] = useState(DEFAULT_COLOR)
   const [brushWidth, setBrushWidth] = useState(4)
@@ -1249,12 +1235,6 @@ export function ImageEditorWorkspace({
   const poseDragRef = useRef<{ ids: string[]; points: PosePoint[]; start: { x: number; y: number } } | null>(null)
   const poseSelectionDragRef = useRef<PoseSelectionDragState | null>(null)
   const [poseSelectionRect, setPoseSelectionRect] = useState<{ left: number; top: number; width: number; height: number } | null>(null)
-  const [generationMode, setGenerationMode] = useState<'image' | 'video'>('image')
-  const [imageCount, setImageCount] = useState<1 | 2 | 4>(4)
-  const [videoCount, setVideoCount] = useState<1 | 2>(1)
-  const [videoDuration, setVideoDuration] = useState(5)
-  const [videoResolution, setVideoResolution] = useState<VideoResolution>('720p')
-  const [generating, setGenerating] = useState(false)
   const [saving, setSaving] = useState(false)
   const [exportScale, setExportScale] = useState(2)
   const [exportMenuOpen, setExportMenuOpen] = useState(false)
@@ -1434,7 +1414,7 @@ export function ImageEditorWorkspace({
   }, [refreshLayers, syncCanvasInteractionState])
 
   const undo = useCallback(async () => {
-    if (historyBusyRef.current || cutoutObjectIdRef.current || savingRef.current || generatingRef.current || exportingRef.current) return
+    if (historyBusyRef.current || cutoutObjectIdRef.current || savingRef.current || exportingRef.current) return
     historyBusyRef.current = true
     if (canvasRef.current) syncCanvasInteractionState(canvasRef.current)
     setHistoryBusy(true)
@@ -1460,7 +1440,7 @@ export function ImageEditorWorkspace({
   }, [applySnapshot, enqueueHistoryOperation, flushHistory, syncCanvasInteractionState, updateHistoryCursor])
 
   const redo = useCallback(async () => {
-    if (historyBusyRef.current || cutoutObjectIdRef.current || savingRef.current || generatingRef.current || exportingRef.current) return
+    if (historyBusyRef.current || cutoutObjectIdRef.current || savingRef.current || exportingRef.current) return
     historyBusyRef.current = true
     if (canvasRef.current) syncCanvasInteractionState(canvasRef.current)
     setHistoryBusy(true)
@@ -1996,7 +1976,7 @@ export function ImageEditorWorkspace({
   finishCropRef.current = finishCrop
 
   const startCrop = useCallback(async (candidate?: FabricObject | null) => {
-    if (historyBusyRef.current || savingRef.current || generatingRef.current || exportingRef.current) return
+    if (historyBusyRef.current || savingRef.current || exportingRef.current) return
     await historyQueueRef.current
     await cutoutOperationRef.current
     await eraserQueueRef.current
@@ -2965,7 +2945,7 @@ export function ImageEditorWorkspace({
     if (!canvas || !(activeObject instanceof FabricImage)) return Promise.resolve()
     let image = activeObject as FabricImage & EditorObject
     if (cutoutObjectIdRef.current) return cutoutOperationRef.current
-    if (cropStateRef.current || historyBusyRef.current || savingRef.current || generatingRef.current || exportingRef.current) return Promise.resolve()
+    if (cropStateRef.current || historyBusyRef.current || savingRef.current || exportingRef.current) return Promise.resolve()
     const editorImage = image as EditorObject
     const imageId = editorImage.id || configureObject(editorImage).id!
     let element = image.getElement() as HTMLImageElement
@@ -3107,88 +3087,6 @@ export function ImageEditorWorkspace({
     return operation
   }, [flushHistory, recordHistory, refreshLayers, syncCanvasInteractionState])
 
-  const switchGenerationMode = useCallback(() => {
-    if (generationMode === 'image') {
-      setGenerationMode('video')
-      if (!VIDEO_ASPECT_RATIO_SET.has(aspectRatioRef.current)) resizeArtboard('16:9')
-      return
-    }
-    setGenerationMode('image')
-  }, [generationMode, resizeArtboard])
-
-  const cycleVideoDuration = useCallback(() => {
-    setVideoDuration((current) => {
-      const index = VIDEO_DURATIONS.indexOf(current)
-      return VIDEO_DURATIONS[(index + 1) % VIDEO_DURATIONS.length]
-    })
-  }, [])
-
-  const cycleVideoResolution = useCallback(() => {
-    setVideoResolution((current) => {
-      const index = VIDEO_RESOLUTIONS.indexOf(current)
-      return VIDEO_RESOLUTIONS[(index + 1) % VIDEO_RESOLUTIONS.length]
-    })
-  }, [])
-
-  const generateFromPrompt = useCallback(async () => {
-    if (generatingRef.current || !promptRef.current.trim()) return
-    if (!onGenerate) {
-      setFeedback('当前画布未接入图片生成')
-      return
-    }
-    generatingRef.current = true
-    setGenerating(true)
-    try {
-      await historyQueueRef.current
-      await cutoutOperationRef.current
-      resolvePenDraft()
-      if (cropStateRef.current) finishCropRef.current()
-      await eraserQueueRef.current
-      const canvas = canvasRef.current
-      if (!canvas) throw new Error('图片编辑画布不可用')
-      let coverDataUrl: string
-      try {
-        coverDataUrl = renderCanvasWithBackground(canvas, 1, backgroundRef.current).toDataURL('image/png')
-      } catch {
-        setFeedback('当前素材受跨域限制，无法作为生成参考')
-        return
-      }
-      const commit = await saveCompositionRef.current(false)
-      if (!commit) return
-      const commonRequest = {
-        prompt: promptRef.current.trim(),
-        coverDataUrl,
-        width: widthRef.current,
-        height: heightRef.current,
-        aspectRatio: aspectRatioRef.current,
-        sourceNodeIds: [commit.outputNodeId],
-        outputNodeId: commit.outputNodeId,
-      }
-      const request: ImageEditorGenerateRequest = generationMode === 'video'
-        ? {
-            ...commonRequest,
-            mediaType: 'video',
-            count: videoCount,
-            duration: videoDuration,
-            resolution: videoResolution,
-            modelId: 'seedance-2',
-          }
-        : {
-            ...commonRequest,
-            mediaType: 'image',
-            count: imageCount,
-            modelId: 'gemini-banana-2',
-          }
-      await onGenerate(request)
-      setFeedback(generationMode === 'video' ? '视频生成任务已创建' : '图片生成任务已创建')
-    } catch {
-      setFeedback('生成任务创建失败，请重试')
-    } finally {
-      generatingRef.current = false
-      setGenerating(false)
-    }
-  }, [generationMode, imageCount, onGenerate, resolvePenDraft, videoCount, videoDuration, videoResolution])
-
   const exportCanvas = useCallback(async (format: ExportFormat) => {
     if (exportingRef.current) return
     exportingRef.current = true
@@ -3326,7 +3224,7 @@ export function ImageEditorWorkspace({
   }, [])
 
   const requestClose = useCallback(async () => {
-    if (savingRef.current || generatingRef.current || exportingRef.current) {
+    if (savingRef.current || exportingRef.current) {
       setFeedback('当前操作完成后再关闭编辑器')
       return
     }
@@ -3642,8 +3540,7 @@ export function ImageEditorWorkspace({
       window.requestAnimationFrame(() => {
         const items = ratioMenuRef.current?.querySelectorAll<HTMLElement>('[role="menuitemradio"]')
         if (!items?.length) return
-        const keyboardRatios = generationMode === 'video' ? VIDEO_ASPECT_RATIOS : aspectRatios
-        const selectedIndex = keyboardRatios.indexOf(aspectRatio)
+        const selectedIndex = aspectRatios.indexOf(aspectRatio)
         items[Math.max(0, selectedIndex)]?.focus()
       })
       return
@@ -3659,7 +3556,7 @@ export function ImageEditorWorkspace({
           ? (activeIndex + 1) % items.length
           : (activeIndex - 1 + items.length) % items.length
     items[nextIndex]?.focus()
-  }, [aspectRatio, generationMode, ratioMenuOpen])
+  }, [aspectRatio, ratioMenuOpen])
 
   useEffect(() => {
     const handleTabCapture = (event: KeyboardEvent) => {
@@ -3706,7 +3603,7 @@ export function ImageEditorWorkspace({
       else scope?.focus()
     })
     return () => window.cancelAnimationFrame(frame)
-  }, [closeDialogOpen, cropMode, cutoutObjectId, exportingFormat, generating, historyBusy, poseGeneratorOpen, saving])
+  }, [closeDialogOpen, cropMode, cutoutObjectId, exportingFormat, historyBusy, poseGeneratorOpen, saving])
 
   useEffect(() => {
     const releaseSpacePan = () => {
@@ -3741,7 +3638,6 @@ export function ImageEditorWorkspace({
         if (
           historyBusyRef.current
           || savingRef.current
-          || generatingRef.current
           || exportingRef.current
           || cutoutObjectIdRef.current
           || cropStateRef.current
@@ -3752,7 +3648,7 @@ export function ImageEditorWorkspace({
         return
       }
       if (editing) return
-      if (historyBusyRef.current || savingRef.current || generatingRef.current || exportingRef.current) {
+      if (historyBusyRef.current || savingRef.current || exportingRef.current) {
         if (event.key !== 'Tab') event.preventDefault()
         return
       }
@@ -3846,12 +3742,10 @@ export function ImageEditorWorkspace({
   const exportDimensions = scaledExportDimensions(width, height, exportScale)
   const canUndo = historyCursor.index > 0
   const canRedo = historyCursor.index >= 0 && historyCursor.index < historyCursor.length - 1
-  const transactionBusy = historyBusy || Boolean(cutoutObjectId) || generating || Boolean(exportingFormat)
+  const transactionBusy = historyBusy || Boolean(cutoutObjectId) || Boolean(exportingFormat)
   const interfaceLocked = cropMode || transactionBusy
   const showRailPanel = Boolean(railMode)
   const contextLayerIndex = layerContextMenu ? layers.findIndex((layer) => layer.id === layerContextMenu.layerId) : -1
-  const currentCount = generationMode === 'video' ? videoCount : imageCount
-  const availableAspectRatios = generationMode === 'video' ? VIDEO_ASPECT_RATIOS : aspectRatios
   const currentPaint = singleActiveObject?.objectKind === 'brush' || singleActiveObject?.objectKind === 'pen' || singleActiveObject?.objectKind === 'arrow'
     ? singleActiveObject.stroke
     : singleActiveObject?.fill
@@ -3955,7 +3849,7 @@ export function ImageEditorWorkspace({
             </button>
             {ratioMenuOpen && (
               <div className="image-editor-ratio-menu" role="menu" aria-label="选择画布比例">
-                {availableAspectRatios.map((ratio) => (
+                {aspectRatios.map((ratio) => (
                   <button
                     type="button"
                     key={ratio}
@@ -4064,7 +3958,7 @@ export function ImageEditorWorkspace({
         <div className="image-editor-export-menu" role="menu" aria-label="导出图片">
           <button type="button" role="menuitem" disabled={Boolean(exportingFormat)} onClick={() => exportCanvas('png')}>PNG</button>
           <button type="button" role="menuitem" disabled={Boolean(exportingFormat)} onClick={() => exportCanvas('jpeg')}>JPG</button>
-          <button type="button" role="menuitem" disabled={Boolean(exportingFormat)} onClick={() => exportCanvas('psd')}>{exportingFormat === 'psd' ? <><LoaderCircle className="image-editor-spin" size={15} />正在导出 PSD</> : 'PSD'}</button>
+          <button type="button" role="menuitem" disabled={Boolean(exportingFormat)} onClick={() => exportCanvas('psd')}>{exportingFormat === 'psd' ? <><LoaderCircle className="image-editor-spin" size={15} /><ShinyText text="正在导出 PSD" speed={1.6} color="#bfc0c1" shineColor="#ffffff" spread={90} /></> : 'PSD'}</button>
         </div>
       )}
 
@@ -4086,6 +3980,7 @@ export function ImageEditorWorkspace({
         <aside className={`image-editor-side-panel rail-${railMode}`} aria-label={railMode === 'assets' ? '画布素材' : railMode === 'history' ? '资产' : '图形库'} inert={interfaceLocked} aria-hidden={interfaceLocked || undefined}>
           {railMode === 'assets' && (
             <>
+              <h2 className="image-editor-side-panel-title">画布中的内容</h2>
               <div className="image-editor-asset-grid">
                 {imageAssets.map((asset) => (
                   <button type="button" key={asset.id} aria-label={`添加素材 ${asset.title}`} data-tooltip={asset.title} onClick={() => void addImage(asset)}>
@@ -4263,68 +4158,6 @@ export function ImageEditorWorkspace({
           {tool !== 'pen' && <ToolButton disabled={!canRedo} label="恢复" onClick={() => void redo()}><Redo2 size={18} /></ToolButton>}
           <ToolButton label="适应画布" onClick={() => fitCanvas()}><Focus size={18} /></ToolButton>
         </div>
-        <div className="image-editor-generation-footer">
-          <button
-            type="button"
-            className="image-editor-mode-toggle"
-            aria-label={generationMode === 'image' ? '图片生成模式' : '视频生成模式'}
-            data-tooltip={generationMode === 'image' ? '图片生成' : '视频生成'}
-            disabled={generating}
-            onClick={switchGenerationMode}
-          >
-            {generationMode === 'image' ? <ImageIcon size={20} /> : <Video size={20} />}
-          </button>
-          <div className={`image-editor-prompt-row ${generationMode === 'video' ? 'is-video' : ''}`}>
-            <textarea
-              value={prompt}
-              aria-label={generationMode === 'image' ? '图片生成提示词' : '视频生成提示词'}
-              placeholder={generationMode === 'image' ? '请输入图像生成的提示词' : '请输入视频生成的提示词'}
-              onChange={(event) => {
-                if (historyBusyRef.current || cutoutObjectIdRef.current) return
-                promptRef.current = event.target.value
-                setPromptState(event.target.value)
-              }}
-            />
-            {generationMode === 'video' && (
-              <div className="image-editor-video-params" aria-label="视频生成参数">
-                <button type="button" className="image-editor-video-model" aria-label="seedance-2.0 Seedance 2.0"><span className="image-editor-model-mark" aria-hidden="true">S</span><span>Seedance 2.0</span></button>
-                <button type="button" aria-label="切换视频时长" onClick={cycleVideoDuration}><Clock3 size={15} /><span>{videoDuration}s</span></button>
-                <button type="button" aria-label="切换视频分辨率" onClick={cycleVideoResolution}><ScanLine size={15} /><span>{videoResolution}</span></button>
-              </div>
-            )}
-            <div className="image-editor-count" aria-label="生成数量">
-              <button
-                type="button"
-                aria-label="减少生成数量"
-                disabled={currentCount <= 1}
-                onClick={() => {
-                  if (generationMode === 'video') setVideoCount(1)
-                  else setImageCount((current) => current === 4 ? 2 : 1)
-                }}
-              ><ChevronLeft size={13} /></button>
-              <button
-                type="button"
-                className="image-editor-count-value"
-                aria-label="循环生成数量"
-                aria-live="polite"
-                onClick={() => {
-                  if (generationMode === 'video') setVideoCount((current) => current === 2 ? 1 : 2)
-                  else setImageCount((current) => current === 4 ? 1 : current === 2 ? 4 : 2)
-                }}
-              >{currentCount}</button>
-              <button
-                type="button"
-                aria-label="增加生成数量"
-                disabled={generationMode === 'video' ? videoCount >= 2 : imageCount >= 4}
-                onClick={() => {
-                  if (generationMode === 'video') setVideoCount(2)
-                  else setImageCount((current) => current === 1 ? 2 : 4)
-                }}
-              ><ChevronRight size={13} /></button>
-            </div>
-            <button type="button" className="image-editor-generate" disabled={!prompt.trim() || generating} onClick={() => void generateFromPrompt()}>{generating ? '生成中' : '生成'}</button>
-          </div>
-        </div>
       </footer>
 
       <input ref={uploadInputRef} type="file" accept="image/*" className="sr-only" aria-label="上传图片" tabIndex={-1} disabled={interfaceLocked} onChange={(event) => { void handleUpload(event.target.files?.[0]); event.currentTarget.value = '' }} />
@@ -4403,12 +4236,12 @@ export function ImageEditorWorkspace({
               {saveDialogPurpose === 'close' ? (
                 <>
                   <button type="button" className="secondary danger" disabled={saving} onClick={closeWorkspace}>直接退出</button>
-                  <button type="button" className="primary" disabled={saving} onClick={() => void saveComposition(true)}>{saving ? '保存中…' : '保存并关闭'}</button>
+                  <button type="button" className="primary" disabled={saving} onClick={() => void saveComposition(true)}>{saving ? <ShinyText text="保存中…" speed={1.5} color="#a8abad" shineColor="#f5f5f5" spread={86} /> : '保存并关闭'}</button>
                 </>
               ) : (
                 <>
                   <button type="button" className="secondary" disabled={saving} onClick={() => setCloseDialogOpen(false)}>取消</button>
-                  <button type="button" className="primary" disabled={saving} onClick={() => void saveComposition(false)}>{saving ? '保存中…' : '保存'}</button>
+                  <button type="button" className="primary" disabled={saving} onClick={() => void saveComposition(false)}>{saving ? <ShinyText text="保存中…" speed={1.5} color="#a8abad" shineColor="#f5f5f5" spread={86} /> : '保存'}</button>
                 </>
               )}
             </div>

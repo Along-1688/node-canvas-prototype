@@ -26,10 +26,9 @@ import {
   Trash2,
   Ungroup,
 } from 'lucide-react'
-import { allowedTargetsForSource, labelForType } from './domain'
+import { allowedContextSourcesForTarget, allowedTargetsForSource, labelForType } from './domain'
 import { AnchoredPopover } from './floating'
 import { MediaTypeIcon, mediaNodeTypes, mediaTypeLabels } from './mediaTypes'
-import { mediaAsset } from './mediaAssets'
 import type { AssetFolder, CanvasFlowNode, CanvasGroup, CanvasPlaylist, DrawerKey, GenerationTask, MediaNodeType, SessionAsset } from './types'
 
 export type AuxiliaryTool = '播放列表' | '图片编辑器'
@@ -160,7 +159,7 @@ const auxiliaryToolDetails: Record<AuxiliaryTool, { description: string; icon: R
   '图片编辑器': { description: '集中处理画布中的图片素材', icon: <ImageIcon size={17} />, iconClassName: 'icon-image-editor' },
 }
 
-export function ContinuationMenu({ position, sourceType, onAddNode, onAuxiliaryTool, onClose, ariaLabel = '继续添加' }: {
+export function ContinuationMenu({ position, sourceType, onAddNode, onAuxiliaryTool, onClose, ariaLabel = '引用该节点生成' }: {
   position: { x: number; y: number }
   sourceType: MediaNodeType
   onAddNode: (type: MediaNodeType) => void
@@ -178,7 +177,7 @@ export function ContinuationMenu({ position, sourceType, onAddNode, onAuxiliaryT
 
   return (
     <aside className="quick-add-menu unified-add-menu continuation-add-menu" style={menuPosition} aria-label={ariaLabel}>
-      <header><strong>继续添加</strong><button type="button" onClick={onClose} aria-label={`关闭${ariaLabel}`}><X size={16} /></button></header>
+      <header><strong>引用该节点生成</strong><button type="button" onClick={onClose} aria-label={`关闭${ariaLabel}`}><X size={16} /></button></header>
       <div className="add-menu-content continuation-menu-content">
         <div className="add-list">
           {items.map((item, index) => {
@@ -204,6 +203,38 @@ export function ContinuationMenu({ position, sourceType, onAddNode, onAuxiliaryT
   )
 }
 
+export function ContextMenu({ position, target, onAddNode, onClose, ariaLabel = '添加上下文' }: {
+  position: { x: number; y: number }
+  target: CanvasFlowNode
+  onAddNode: (type: MediaNodeType) => void
+  onClose: () => void
+  ariaLabel?: string
+}) {
+  const sourceTypes = allowedContextSourcesForTarget(target)
+  const menuPosition = resolveMenuPosition(position, 74 + sourceTypes.length * 47)
+  const firstItemRef = useRef<HTMLButtonElement>(null)
+
+  useEffect(() => {
+    firstItemRef.current?.focus()
+  }, [])
+
+  return (
+    <aside className="quick-add-menu unified-add-menu context-add-menu" style={menuPosition} aria-label={ariaLabel}>
+      <header><strong>添加上下文</strong><button type="button" onClick={onClose} aria-label={`关闭${ariaLabel}`}><X size={16} /></button></header>
+      <div className="add-menu-content">
+        <div className="add-list">
+          {sourceTypes.map((type, index) => (
+            <button ref={index === 0 ? firstItemRef : undefined} type="button" key={type} onClick={() => onAddNode(type)}>
+              <span className={`add-icon icon-${type}`}><MediaTypeIcon type={type} /></span>
+              <span><strong>{mediaTypeLabels[type]}</strong><small>{addNodeDescriptions[type]}</small></span>
+            </button>
+          ))}
+        </div>
+      </div>
+    </aside>
+  )
+}
+
 function SearchBox({ value, onChange, placeholder }: { value: string; onChange: (value: string) => void; placeholder: string }) {
   return <label className="drawer-search"><Search size={16} /><span className="sr-only">{placeholder}</span><input value={value} onChange={(event) => onChange(event.target.value)} placeholder={placeholder} /></label>
 }
@@ -212,7 +243,7 @@ type AssetEntry = { id: string; title: string; type: '文本' | '图片' | '视�
 
 const assetEntries: AssetEntry[] = [
   { id: 'dog', title: '柴犬棚拍首帧', type: '图片', nodeType: 'image', className: 'asset-poster dog-poster', category: 'uncategorized', scope: 'personal' },
-  { id: 'anime', title: '主播探店视频', type: '视频', nodeType: 'video', className: 'asset-poster video-poster', posterUrl: mediaAsset('virtual-ip-host-video-poster.jpg'), category: 'campaign', scope: 'project' },
+  { id: 'anime', title: '主播探店视频', type: '视频', nodeType: 'video', className: 'asset-poster video-poster', posterUrl: '/node-canvas-prototype/assets/virtual-ip-host-video-poster.jpg', category: 'campaign', scope: 'project' },
   { id: 'audio', title: '环境氛围音', type: '音频', nodeType: 'audio', className: 'asset-poster audio-poster', category: 'campaign', scope: 'personal' },
 ]
 

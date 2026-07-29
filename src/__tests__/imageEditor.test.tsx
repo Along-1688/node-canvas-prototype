@@ -24,7 +24,7 @@ const source: ImageEditorAsset = {
   id: 'source-image',
   sourceNodeId: 'image-source',
   title: '横版源图',
-  src: '/assets/source.png',
+  src: '/node-canvas-prototype/assets/source.png',
   aspectRatio: 16 / 9,
 }
 

@@ -1,0 +1,27 @@
+.shiny-text {
+  position: relative;
+  display: inline-grid;
+  color: var(--shiny-text-color);
+  line-height: inherit;
+}
+
+.shiny-text > span { grid-area: 1 / 1; }
+
+.shiny-text-highlight {
+  color: var(--shiny-text-highlight);
+  pointer-events: none;
+  clip-path: polygon(122% 0, calc(122% - var(--shiny-text-band)) 0, calc(98% - var(--shiny-text-band)) 100%, 98% 100%);
+  animation: shiny-text-sweep var(--shiny-text-speed) linear var(--shiny-text-delay) infinite var(--shiny-text-direction) var(--shiny-text-cycle);
+}
+
+.shiny-text.pause-on-hover:hover .shiny-text-highlight { animation-play-state: paused; }
+.shiny-text.is-disabled .shiny-text-highlight { display: none; }
+
+@keyframes shiny-text-sweep {
+  from { clip-path: polygon(122% 0, calc(122% - var(--shiny-text-band)) 0, calc(98% - var(--shiny-text-band)) 100%, 98% 100%); }
+  to { clip-path: polygon(2% 0, calc(2% - var(--shiny-text-band)) 0, calc(-22% - var(--shiny-text-band)) 100%, -22% 100%); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .shiny-text-highlight { display: none; }
+}

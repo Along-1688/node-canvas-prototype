@@ -1,7 +1,7 @@
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { Path as FabricPath, Rect as FabricRect } from 'fabric'
-import type { ImageEditorCommitPayload, ImageEditorComposition, ImageEditorGenerateRequest } from '../types'
+import type { ImageEditorComposition } from '../types'
 import { ImageEditorWorkspace } from '../imageEditorWorkspace'
 
 type FabricCanvasHarness = {
@@ -269,7 +269,9 @@ describe('real image editor workspace wiring', () => {
     const canvasAssetsButton = screen.getByRole('button', { name: '画布素材' })
     expect(canvasAssetsButton.querySelector('.lucide-image')).toBeInTheDocument()
     fireEvent.click(canvasAssetsButton)
-    expect(screen.getByRole('complementary', { name: '画布素材' })).not.toHaveTextContent('关联的图片')
+    const canvasAssetsPanel = screen.getByRole('complementary', { name: '画布素材' })
+    expect(canvasAssetsPanel).toHaveTextContent('画布中的内容')
+    expect(canvasAssetsPanel).not.toHaveTextContent('关联的图片')
     expect(screen.queryByRole('tablist', { name: '图片来源' })).not.toBeInTheDocument()
     const assetButton = screen.getByRole('button', { name: '资产' })
     expect(assetButton.querySelector('.lucide-folder-open')).toBeInTheDocument()
@@ -297,168 +299,19 @@ describe('real image editor workspace wiring', () => {
     expect(screen.getByRole('dialog', { name: '画布背景色' })).toHaveClass('is-background')
   })
 
-  it('uses TapNow image counts 1/2/4 and cycles from the value button', async () => {
+  it('keeps generation in the canvas node and removes the image-editor generation bar', () => {
     render(
       <ImageEditorWorkspace
         assets={[]}
         initialComposition={initialComposition}
         onClose={vi.fn()}
-        onGenerate={vi.fn()}
         onSave={vi.fn().mockResolvedValue({ outputNodeId: 'saved-editor-node' })}
       />,
     )
 
-    const decrease = screen.getByRole('button', { name: '减少生成数量' })
-    const increase = screen.getByRole('button', { name: '增加生成数量' })
-    const countControl = screen.getByLabelText('生成数量')
-    const count = () => within(countControl).getByRole('button', { name: '循环生成数量' })
-
-    expect(count()).toHaveTextContent('4')
-    expect(increase).toBeDisabled()
-
-    fireEvent.click(count())
-    expect(count()).toHaveTextContent('1')
-
-    fireEvent.click(increase)
-    expect(count()).toHaveTextContent('2')
-    fireEvent.click(increase)
-    expect(count()).toHaveTextContent('4')
-    fireEvent.click(decrease)
-    expect(count()).toHaveTextContent('2')
-    fireEvent.click(decrease)
-    expect(count()).toHaveTextContent('1')
-    expect(decrease).toBeDisabled()
-  })
-
-  it('routes image generation through the real workspace callback', async () => {
-    const onGenerate = vi.fn<(request: ImageEditorGenerateRequest) => Promise<void>>().mockResolvedValue()
-    const onSave = vi.fn().mockResolvedValue({ outputNodeId: 'saved-editor-node' })
-    const onClose = vi.fn()
-
-    render(
-      <ImageEditorWorkspace
-        assets={[]}
-        initialComposition={initialComposition}
-        onClose={onClose}
-        onGenerate={onGenerate}
-        onSave={onSave}
-      />,
-    )
-
-    const prompt = screen.getByRole('textbox', { name: '图片生成提示词' })
-    fireEvent.change(prompt, { target: { value: '把白天改成夜景' } })
-    fireEvent.click(screen.getByRole('button', { name: '减少生成数量' }))
-    fireEvent.click(screen.getByRole('button', { name: '生成' }))
-
-    await waitFor(() => expect(onGenerate).toHaveBeenCalledTimes(1))
-    expect(onGenerate).toHaveBeenCalledWith(expect.objectContaining({
-      mediaType: 'image',
-      prompt: '把白天改成夜景',
-      count: 2,
-      coverDataUrl: 'data:image/png;base64,workspace-cover',
-      aspectRatio: '16:9',
-      modelId: 'gemini-banana-2',
-      sourceNodeIds: ['saved-editor-node'],
-      outputNodeId: 'saved-editor-node',
-    }))
-    expect(onSave).toHaveBeenCalledTimes(1)
-    expect(onClose).not.toHaveBeenCalled()
-    expect(onSave.mock.invocationCallOrder[0]).toBeLessThan(onGenerate.mock.invocationCallOrder[0])
-  })
-
-  it('keeps the editor open when task creation fails', async () => {
-    const onGenerate = vi.fn<(request: ImageEditorGenerateRequest) => Promise<void>>()
-      .mockRejectedValue(new Error('generation unavailable'))
-    const onSave = vi.fn().mockResolvedValue({ outputNodeId: 'saved-editor-node' })
-    const onClose = vi.fn()
-
-    render(
-      <ImageEditorWorkspace
-        assets={[]}
-        initialComposition={initialComposition}
-        onClose={onClose}
-        onGenerate={onGenerate}
-        onSave={onSave}
-      />,
-    )
-
-    fireEvent.change(screen.getByRole('textbox', { name: '图片生成提示词' }), { target: { value: '保留当前输入' } })
-    fireEvent.click(screen.getByRole('button', { name: '生成' }))
-
-    expect(await screen.findByText('生成任务创建失败，请重试')).toBeInTheDocument()
-    expect(onSave).toHaveBeenCalledTimes(1)
-    expect(onGenerate).toHaveBeenCalledWith(expect.objectContaining({
-      outputNodeId: 'saved-editor-node',
-      sourceNodeIds: ['saved-editor-node'],
-    }))
-    expect(onClose).not.toHaveBeenCalled()
-    expect(onSave.mock.invocationCallOrder[0]).toBeLessThan(onGenerate.mock.invocationCallOrder[0])
-  })
-
-  it('switches the TapNow prompt between image and video generation', () => {
-    render(
-      <ImageEditorWorkspace
-        assets={[]}
-        initialComposition={initialComposition}
-        onClose={vi.fn()}
-        onGenerate={vi.fn()}
-        onSave={vi.fn().mockResolvedValue({ outputNodeId: 'saved-editor-node' })}
-      />,
-    )
-
-    expect(screen.getByRole('textbox', { name: '图片生成提示词' })).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: '图片生成模式' })).toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: '视频生成模式' })).not.toBeInTheDocument()
-
-    fireEvent.click(screen.getByRole('button', { name: '图片生成模式' }))
-
-    expect(screen.getByRole('button', { name: '视频生成模式' })).toBeInTheDocument()
-    expect(screen.getByRole('textbox', { name: '视频生成提示词' })).toBeInTheDocument()
-    expect(screen.getByText('Seedance 2.0')).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: '切换视频时长' })).toHaveTextContent('5s')
-    expect(screen.getByRole('button', { name: '切换视频分辨率' })).toHaveTextContent('720p')
-    expect(within(screen.getByLabelText('生成数量')).getByRole('button', { name: '循环生成数量' })).toHaveTextContent('1')
-  })
-
-  it('routes video generation with TapNow model parameters and a supported canvas ratio', async () => {
-    const onGenerate = vi.fn<(request: ImageEditorGenerateRequest) => Promise<void>>().mockResolvedValue()
-    const onSave = vi.fn().mockResolvedValue({ outputNodeId: 'saved-editor-node' })
-    const customComposition: ImageEditorComposition = {
-      ...initialComposition,
-      aspectRatio: 'custom',
-      width: 1000,
-      height: 1000,
-    }
-
-    render(
-      <ImageEditorWorkspace
-        assets={[]}
-        initialComposition={customComposition}
-        onClose={vi.fn()}
-        onGenerate={onGenerate}
-        onSave={onSave}
-      />,
-    )
-
-    fireEvent.click(screen.getByRole('button', { name: '图片生成模式' }))
-    expect(screen.getByRole('button', { name: '画布比例' })).toHaveTextContent('16:9')
-    fireEvent.change(screen.getByRole('textbox', { name: '视频生成提示词' }), { target: { value: '镜头缓慢向前推进' } })
-    fireEvent.click(screen.getByRole('button', { name: '增加生成数量' }))
-    fireEvent.click(screen.getByRole('button', { name: '生成' }))
-
-    await waitFor(() => expect(onGenerate).toHaveBeenCalledTimes(1))
-    expect(onGenerate).toHaveBeenCalledWith(expect.objectContaining({
-      mediaType: 'video',
-      prompt: '镜头缓慢向前推进',
-      count: 2,
-      duration: 5,
-      resolution: '720p',
-      aspectRatio: '16:9',
-      modelId: 'seedance-2',
-      sourceNodeIds: ['saved-editor-node'],
-      outputNodeId: 'saved-editor-node',
-    }))
-    expect(onSave.mock.invocationCallOrder[0]).toBeLessThan(onGenerate.mock.invocationCallOrder[0])
+    expect(screen.queryByRole('textbox', { name: /生成提示词/ })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '生成' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '图片生成模式' })).not.toBeInTheDocument()
   })
 
   it('opens the custom TapNow ratio menu with every supported ratio', () => {
@@ -626,45 +479,10 @@ describe('real image editor workspace wiring', () => {
       />,
     )
 
-    const prompt = screen.getByRole('textbox', { name: '图片生成提示词' })
-    prompt.focus()
-    fireEvent.keyDown(prompt, { key: 's', ctrlKey: true })
+    fireEvent.keyDown(window, { key: 's', ctrlKey: true })
 
     expect(screen.getByRole('dialog', { name: '保存画布数据' })).toBeInTheDocument()
     expect(onSave).not.toHaveBeenCalled()
-  })
-
-  it('keeps Prompt outside editor snapshots, saves, and dirty state', async () => {
-    const saveGate = deferred<{ outputNodeId: string }>()
-    const onSave = vi.fn((_payload: ImageEditorCommitPayload) => saveGate.promise)
-
-    render(
-      <ImageEditorWorkspace
-        assets={[]}
-        initialComposition={initialComposition}
-        onClose={vi.fn()}
-        onSave={onSave}
-      />,
-    )
-
-    const prompt = screen.getByRole('textbox', { name: /生成提示词/ })
-    fireEvent.change(prompt, { target: { value: '第一版提示词' } })
-    fireEvent.click(screen.getByRole('button', { name: '保存编辑结果' }))
-    fireEvent.click(within(screen.getByRole('dialog', { name: '保存画布数据' })).getByRole('button', { name: '保存' }))
-
-    await waitFor(() => expect(onSave).toHaveBeenCalledTimes(1))
-    expect(onSave.mock.calls[0][0].composition.prompt).toBeUndefined()
-    const editor = screen.getByRole('dialog', { name: '图片编辑器' })
-    expect(editor).toHaveAttribute('aria-busy', 'true')
-
-    fireEvent.change(prompt, { target: { value: '保存期间产生的第二版提示词' } })
-    await act(async () => saveGate.resolve({ outputNodeId: 'saved-editor-node' }))
-    await waitFor(() => expect(editor).not.toHaveAttribute('aria-busy'))
-
-    expect(prompt).toHaveValue('保存期间产生的第二版提示词')
-    fireEvent.click(screen.getByRole('button', { name: '关闭图片编辑器' }))
-    await waitFor(() => expect(onSave).toHaveBeenCalledTimes(1))
-    expect(screen.queryByRole('dialog', { name: /有未保存的更改/ })).not.toBeInTheDocument()
   })
 
   it('closes an unchanged workspace without showing the unsaved dialog', async () => {

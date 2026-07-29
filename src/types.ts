@@ -254,7 +254,7 @@ export interface VideoEditPreviewResult {
 }
 
 export type VideoOperationResult =
-  | { operation: 'super-resolution'; model: 'base' | 'topaz'; scale?: 2 | 4 }
+  | { operation: 'super-resolution'; model: 'node' | 'topaz'; scale?: 2 | 4 }
   | { operation: 'frame-interpolation'; targetFps: 50 | 60 | 90 | 120 }
   | { operation: 'subtitle-removal' }
   | {
@@ -282,6 +282,14 @@ export type VideoOperationResult =
     }
 
 export type VideoOperation = VideoOperationResult['operation']
+
+export type AudioOperation = 'trim'
+
+export interface AudioOperationResult {
+  operation: AudioOperation
+  start: number
+  end: number
+}
 
 export interface TextFormat {
   block: 'body' | 'h1' | 'h2' | 'h3'
@@ -366,6 +374,7 @@ export interface CanvasNodeData extends Record<string, unknown> {
   playlistComposition?: PlaylistComposition
   videoGeneration?: VideoGenerationParams
   videoOperation?: VideoOperationResult
+  audioOperation?: AudioOperationResult
   seedanceCompliance?: 'checking' | 'approved'
   seedanceComplianceAssetIds?: string[]
   backgroundColor?: 'default' | 'paper' | 'rose' | 'amber' | 'olive' | 'teal' | 'blue' | 'violet'
@@ -373,9 +382,10 @@ export interface CanvasNodeData extends Record<string, unknown> {
 }
 
 export interface CanvasEdgeData extends Record<string, unknown> {
-  relationType: 'generation-input' | 'image-operation' | 'video-operation'
+  relationType: 'generation-input' | 'image-operation' | 'video-operation' | 'audio-operation'
   operation?: ImageOperation
   videoOperation?: VideoOperation
+  audioOperation?: AudioOperation
   inputRole?: GenerationReferenceRole
   highlighted?: boolean
   hovered?: boolean
@@ -426,6 +436,7 @@ export interface GenerationTask {
   promptAssets?: PromptAssetReference[]
   imageGeneration?: ImageGenerationParams
   imageOperation?: ImageOperationResult
+  audioOperation?: AudioOperationResult
   videoGeneration?: VideoGenerationParams
   videoOperation?: VideoOperationResult
   modeId?: string

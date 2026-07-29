@@ -1,6 +1,7 @@
 import type { Connection } from '@xyflow/react';
 import { describe, expect, it } from 'vitest';
 import {
+  allowedContextSourcesForTarget,
   allowedTargetsForSource,
   attachCanvasEdgesToBorders,
   isConnectionPairAllowed,
@@ -58,14 +59,35 @@ describe('node connection domain rules', () => {
   it('exposes the current compatibility matrix from one shared rule', () => {
     expect(allowedTargetsForSource('text')).toEqual(['text', 'image', 'video', 'audio']);
     expect(allowedTargetsForSource('image')).toEqual(['text', 'image', 'video']);
-    expect(allowedTargetsForSource('audio')).toEqual(['video']);
-    expect(allowedTargetsForSource('video')).toEqual(['text', 'video']);
+    expect(allowedTargetsForSource('audio')).toEqual(['audio', 'video']);
+    expect(allowedTargetsForSource('video')).toEqual(['text', 'video', 'audio']);
     expect(isConnectionPairAllowed('text', 'text')).toBe(true);
     expect(isConnectionPairAllowed('image', 'text')).toBe(true);
     expect(isConnectionPairAllowed('image', 'audio')).toBe(false);
     expect(isConnectionPairAllowed('video', 'text')).toBe(true);
+    expect(isConnectionPairAllowed('video', 'audio')).toBe(true);
+    expect(isConnectionPairAllowed('audio', 'audio')).toBe(true);
     expect(isConnectionPairAllowed('video', 'image')).toBe(false);
     expect(isConnectionPairAllowed('video', 'video')).toBe(true);
+  });
+
+  it('uses a separate, deliberately constrained matrix for adding context on the left side', () => {
+    const text = initialNodes.find((node) => node.id === 'text-prompt')!;
+    const generatedImage = initialNodes.find((node) => node.id === 'image-generated')!;
+    const uploadedImage = initialNodes.find((node) => node.id === 'image-upload')!;
+    const video = initialNodes.find((node) => node.id === 'video-host-demo')!;
+    const audio = {
+      ...structuredClone(video),
+      id: 'audio-target',
+      type: 'audio' as const,
+      data: { ...structuredClone(video.data), nodeType: 'audio' as const, sourceKind: 'generated' as const },
+    };
+
+    expect(allowedContextSourcesForTarget(text)).toEqual(['text', 'image']);
+    expect(allowedContextSourcesForTarget(generatedImage)).toEqual(['text', 'image']);
+    expect(allowedContextSourcesForTarget(uploadedImage)).toEqual([]);
+    expect(allowedContextSourcesForTarget(video)).toEqual(['text', 'image', 'audio']);
+    expect(allowedContextSourcesForTarget(audio)).toEqual(['text']);
   });
 
   it('allows text to feed an image and images to create branches', () => {

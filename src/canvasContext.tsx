@@ -2,6 +2,7 @@ import { createContext, useContext } from 'react'
 import type {
   CanvasNodeData,
   CanvasFlowNode,
+  AudioOperationResult,
   GenerationReferenceRole,
   ImageGenerationParams,
   ImageOperation,
@@ -37,7 +38,10 @@ interface CanvasActions {
   completeVideoOperation: (nodeId: string, result: VideoOperationResult) => void
   createLipSyncDerivative: (nodeId: string, result: Extract<VideoOperationResult, { operation: 'lip-sync' }>) => void
   completeVideoEdit: (nodeId: string, result: Extract<VideoOperationResult, { operation: 'edit' }>) => void
+  createAudioTrimDerivative: (nodeId: string, result: AudioOperationResult) => void
+  uploadNodeMedia: (nodeId: string, file: File) => void
   openContinuation: (nodeId: string, clientX: number, clientY: number) => void
+  openContextAdd: (nodeId: string, clientX: number, clientY: number) => void
   beginReferenceSelection: (targetNodeId: string, replaceSourceNodeId?: string, role?: GenerationReferenceRole) => void
   changeVideoGenerationMode: (nodeId: string, mode: VideoGenerationMode) => void
   beginMarkerSelection: (targetNodeId: string) => void

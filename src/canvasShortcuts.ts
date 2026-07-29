@@ -9,6 +9,13 @@ export function isCanvasShortcutTargetInteractive(target: EventTarget | null) {
     && target.matches('input, textarea, select, button, a, summary, [contenteditable="true"], [role="button"], [role="menuitem"], [role="option"]')
 }
 
+export function isCanvasDeleteShortcutTargetEditing(target: EventTarget | null) {
+  if (!(target instanceof HTMLElement)) return false
+  if (target.matches('textarea, select, [contenteditable="true"]')) return true
+  return target instanceof HTMLInputElement
+    && !['button', 'checkbox', 'color', 'file', 'image', 'radio', 'range', 'reset', 'submit'].includes(target.type)
+}
+
 export function isPlaylistDeleteShortcutTarget(target: EventTarget | null, key: string) {
   if (key !== 'Delete' && key !== 'Backspace') return false
   if (!(target instanceof HTMLElement)) return false

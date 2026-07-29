@@ -2,7 +2,7 @@ import type { ComponentProps } from 'react'
 import { fireEvent, render, screen, within } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 import { initialNodes, initialTasks } from '../mockData'
-import { ContinuationMenu, DrawerPanel, QuickAddMenu, continuationItemsForSource } from '../panels'
+import { ContextMenu, ContinuationMenu, DrawerPanel, QuickAddMenu, continuationItemsForSource } from '../panels'
 import type { CanvasGroup, MediaNodeType } from '../types'
 
 function drawerProps(overrides: Partial<ComponentProps<typeof DrawerPanel>> = {}): ComponentProps<typeof DrawerPanel> {
@@ -82,8 +82,8 @@ describe('contextual continuation menu', () => {
   const expectedBySource: Record<MediaNodeType, string[]> = {
     text: ['文本', '图片', '视频', '音频'],
     image: ['文本', '图片', '视频', '图片编辑器'],
-    video: ['文本', '视频', '播放列表'],
-    audio: ['视频'],
+    video: ['文本', '视频', '音频', '播放列表'],
+    audio: ['音频', '视频'],
   }
 
   it.each(Object.entries(expectedBySource) as [MediaNodeType, string[]][])(
@@ -97,7 +97,7 @@ describe('contextual continuation menu', () => {
         onClose={vi.fn()}
       />)
 
-      const menu = screen.getByRole('complementary', { name: '继续添加' })
+      const menu = screen.getByRole('complementary', { name: '引用该节点生成' })
       const actionLabels = within(menu).getAllByRole('button')
         .filter((button) => !button.getAttribute('aria-label'))
         .map((button) => button.querySelector('strong')?.textContent)
@@ -126,8 +126,32 @@ describe('contextual continuation menu', () => {
     expect(continuationItemsForSource('video')).toEqual([
       { kind: 'node', type: 'text' },
       { kind: 'node', type: 'video' },
+      { kind: 'node', type: 'audio' },
       { kind: 'tool', tool: '播放列表' },
     ])
+  })
+})
+
+describe('node context menu', () => {
+  it('shows only text, image and audio inputs that the target can accept', () => {
+    const target = initialNodes.find((node) => node.id === 'video-host-demo')!
+    render(<ContextMenu position={{ x: 200, y: 160 }} target={target} onAddNode={vi.fn()} onClose={vi.fn()} />)
+
+    const menu = screen.getByRole('complementary', { name: '添加上下文' })
+    const actionLabels = within(menu).getAllByRole('button')
+      .filter((button) => !button.getAttribute('aria-label'))
+      .map((button) => button.querySelector('strong')?.textContent)
+
+    expect(actionLabels).toEqual(['文本', '图片', '音频'])
+  })
+
+  it('routes the selected context type to the add callback', () => {
+    const onAddNode = vi.fn()
+    const target = initialNodes.find((node) => node.id === 'text-prompt')!
+    render(<ContextMenu position={{ x: 200, y: 160 }} target={target} onAddNode={onAddNode} onClose={vi.fn()} />)
+
+    fireEvent.click(screen.getByRole('button', { name: /^图片 / }))
+    expect(onAddNode).toHaveBeenCalledWith('image')
   })
 })
 

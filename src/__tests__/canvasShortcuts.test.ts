@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { areCanvasShortcutsIsolated, isCanvasShortcutTargetInteractive, isPlaylistDeleteShortcutTarget } from '../canvasShortcuts'
+import { areCanvasShortcutsIsolated, isCanvasDeleteShortcutTargetEditing, isCanvasShortcutTargetInteractive, isPlaylistDeleteShortcutTarget } from '../canvasShortcuts'
 
 describe('canvas shortcut isolation', () => {
   it('isolates global shortcuts whenever a modal surface is mounted', () => {
@@ -19,6 +19,17 @@ describe('canvas shortcut isolation', () => {
     expect(isCanvasShortcutTargetInteractive(button)).toBe(true)
     expect(isCanvasShortcutTargetInteractive(link)).toBe(true)
     expect(isCanvasShortcutTargetInteractive(canvas)).toBe(false)
+  })
+
+  it('keeps text editing protected while allowing node deletion from media controls', () => {
+    const prompt = document.createElement('textarea')
+    const title = document.createElement('button')
+    const waveform = document.createElement('input')
+    waveform.type = 'range'
+
+    expect(isCanvasDeleteShortcutTargetEditing(prompt)).toBe(true)
+    expect(isCanvasDeleteShortcutTargetEditing(title)).toBe(false)
+    expect(isCanvasDeleteShortcutTargetEditing(waveform)).toBe(false)
   })
 
   it('lets playlist buttons route only Delete and Backspace to the selected playlist item', () => {

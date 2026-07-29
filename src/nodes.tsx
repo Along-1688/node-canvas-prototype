@@ -25,6 +25,7 @@ import {
   FlipVertical2,
   Gauge,
   Grid3X3,
+  GripVertical,
   Globe2,
   Image as ImageIcon,
   Italic,
@@ -69,6 +70,7 @@ import {
 import { useCanvasActions, type CanvasInteractionMode } from './canvasContext'
 import { AnchoredPopover } from './floating'
 import { ImageEditorCompositionPreview } from './imageEditor'
+import { ShinyText } from './ShinyText'
 import {
   EXPAND_SOURCE_RECT,
   buildRepaintResult,
@@ -82,7 +84,6 @@ import {
 } from './imageOperations'
 import { generationDefinitions, videoModeOptions, videoModelCapabilities } from './mockData'
 import { fitMediaAspect, formatMediaResolution } from './mediaGeometry'
-import { mediaAsset } from './mediaAssets'
 import {
   mediaFileExtension,
   resolveVideoGenerationParams,
@@ -201,7 +202,7 @@ function videoModeFor(data: CanvasNodeData): VideoGenerationMode {
   return requested && model.supportedModes.includes(requested) ? requested : model.supportedModes[0]
 }
 
-function NodeHeader({ id, data, icon }: { id: string; data: CanvasNodeData; icon: React.ReactNode }) {
+function NodeHeader({ id, data, icon, draggable = false }: { id: string; data: CanvasNodeData; icon: React.ReactNode; draggable?: boolean }) {
   const { renameNode, runGeneration, updateNode } = useCanvasActions()
   const [editing, setEditing] = useState(false)
   const [draft, setDraft] = useState(data.title)
@@ -227,7 +228,7 @@ function NodeHeader({ id, data, icon }: { id: string; data: CanvasNodeData; icon
   }
 
   return (
-    <div className="node-header">
+    <div className={`node-header ${draggable ? 'node-drag-handle' : ''}`} title={draggable ? '拖动移动音频节点' : undefined}>
       <span className="node-type-icon" aria-hidden="true">{icon}</span>
       {editing ? (
         <input
@@ -264,16 +265,17 @@ function NodeHeader({ id, data, icon }: { id: string; data: CanvasNodeData; icon
           </div>
         </AnchoredPopover>
       </>}
-      {data.seedanceCompliance === 'checking' && <span className="node-compliance-checking" role="status"><LoaderCircle size={13} />正在验证</span>}
+      {data.seedanceCompliance === 'checking' && <span className="node-compliance-checking" role="status"><LoaderCircle size={13} /><ShinyText text="正在验证" speed={1.6} color="#d7a25b" shineColor="#fff3df" spread={84} /></span>}
       {data.seedanceCompliance === 'approved' && <span className="node-compliance-approved nodrag" tabIndex={0} aria-label="素材已合规，可用于 Seedance 2.0 视频生产"><ShieldCheck size={15} /><span className="node-compliance-tooltip" role="tooltip">素材已合规，可用于 Seedance 2.0 视频生产</span></span>}
       {data.pinColor && <span className={`node-pin-dot pin-${data.pinColor}`} title={`${pinOptions.find((item) => item.value === data.pinColor)?.label ?? ''} Pin`} />}
       <InteractionCandidateBadge id={id} type={data.nodeType} />
+      {draggable && <span className="node-drag-indicator" aria-hidden="true"><GripVertical size={15} /></span>}
     </div>
   )
 }
 
 export function SmartPort({ nodeId, id, type, position, label }: { nodeId?: string; id: 'input' | 'output'; type: 'source' | 'target'; position: Position; label: string }) {
-  const { openContinuation } = useCanvasActions()
+  const { openContinuation, openContextAdd } = useCanvasActions()
   const updateNodeInternals = useUpdateNodeInternals()
   const [offset, setOffset] = useState(70)
   const side = position === Position.Left ? 'left' : 'right'
@@ -281,11 +283,13 @@ export function SmartPort({ nodeId, id, type, position, label }: { nodeId?: stri
     if (nodeId) updateNodeInternals(nodeId)
   }, [nodeId, offset, updateNodeInternals])
   const openFromLauncher = (launcher: HTMLElement, clientX?: number, clientY?: number) => {
-    if (type !== 'source') return
     const resolvedNodeId = nodeId ?? launcher.closest<HTMLElement>('.react-flow__node')?.dataset.id
     if (!resolvedNodeId) return
     const rect = launcher.getBoundingClientRect()
-    openContinuation(resolvedNodeId, clientX ?? rect.left + rect.width / 2, clientY ?? rect.top + rect.height / 2)
+    const x = clientX ?? rect.left + rect.width / 2
+    const y = clientY ?? rect.top + rect.height / 2
+    if (type === 'source') openContinuation(resolvedNodeId, x, y)
+    else openContextAdd(resolvedNodeId, x, y)
   }
   return (
     <>
@@ -297,7 +301,7 @@ export function SmartPort({ nodeId, id, type, position, label }: { nodeId?: stri
           setOffset(Math.min(Math.max(event.clientY - rect.top, 27), rect.height - 27))
         }}
       >
-        <Handle id={`${id}-launcher`} type={type} position={position} className="port-launcher nodrag" style={{ top: offset }} aria-label={label} tabIndex={type === 'source' ? 0 : -1} onKeyDown={(event) => {
+        <Handle id={`${id}-launcher`} type={type} position={position} className="port-launcher nodrag" style={{ top: offset }} aria-label={label} tabIndex={0} onKeyDown={(event) => {
           if (event.key !== 'Enter' && event.key !== ' ') return
           event.preventDefault()
           event.stopPropagation()
@@ -316,8 +320,8 @@ export function SmartPort({ nodeId, id, type, position, label }: { nodeId?: stri
 function ConnectionHandles({ nodeId, source = true, target = true }: { nodeId?: string; source?: boolean; target?: boolean }) {
   return (
     <>
-      {target && <SmartPort nodeId={nodeId} id="input" type="target" position={Position.Left} label="输入端口" />}
-      {source && <SmartPort nodeId={nodeId} id="output" type="source" position={Position.Right} label="输出端口" />}
+      {target && <SmartPort nodeId={nodeId} id="input" type="target" position={Position.Left} label="添加上下文" />}
+      {source && <SmartPort nodeId={nodeId} id="output" type="source" position={Position.Right} label="引用该节点生成" />}
     </>
   )
 }
@@ -414,10 +418,10 @@ function assetUrl(data: CanvasNodeData) {
   if (data.media?.url && data.nodeType === 'image') return data.media.url
   if (data.nodeType === 'image' && data.imageOperation?.editorComposition?.renderedDataUrl) return data.imageOperation.editorComposition.renderedDataUrl
   if (data.media?.posterUrl) return data.media.posterUrl
-  if (data.mediaVariant === 'ip') return mediaAsset('virtual-ip-portrait.jpg')
-  if (data.mediaVariant === 'anime') return mediaAsset('generated-anime.png')
-  if (data.mediaVariant === 'poster') return mediaAsset('text-poster.png')
-  return mediaAsset('asset-dog.png')
+  if (data.mediaVariant === 'ip') return '/node-canvas-prototype/assets/virtual-ip-portrait.jpg'
+  if (data.mediaVariant === 'anime') return '/node-canvas-prototype/assets/generated-anime.png'
+  if (data.mediaVariant === 'poster') return '/node-canvas-prototype/assets/text-poster.png'
+  return '/node-canvas-prototype/assets/asset-dog.png'
 }
 
 function imageDownloadSource(data: CanvasNodeData) {
@@ -436,10 +440,10 @@ function promptAssetUrl(asset: PromptAssetReference) {
 function referenceAssetUrl(reference: NodeReference) {
   if (reference.media?.posterUrl) return reference.media.posterUrl
   if (reference.media?.url && reference.nodeType === 'image') return reference.media.url
-  if (reference.mediaVariant === 'ip') return mediaAsset('virtual-ip-portrait.jpg')
-  if (reference.mediaVariant === 'anime' || reference.nodeType === 'video') return mediaAsset('generated-anime.png')
-  if (reference.mediaVariant === 'poster') return mediaAsset('text-poster.png')
-  return mediaAsset('asset-dog.png')
+  if (reference.mediaVariant === 'ip') return '/node-canvas-prototype/assets/virtual-ip-portrait.jpg'
+  if (reference.mediaVariant === 'anime' || reference.nodeType === 'video') return '/node-canvas-prototype/assets/generated-anime.png'
+  if (reference.mediaVariant === 'poster') return '/node-canvas-prototype/assets/text-poster.png'
+  return '/node-canvas-prototype/assets/asset-dog.png'
 }
 
 function InteractionCandidateBadge({ id, type }: { id: string; type: CanvasNodeData['nodeType'] }) {
@@ -593,7 +597,7 @@ function VideoPlayer({ label, media, className = '', compact = false, seekTime }
       <video
         ref={videoRef}
         draggable={false}
-        src={media?.url ?? mediaAsset('virtual-ip-host-video.mp4')}
+        src={media?.url ?? '/node-canvas-prototype/assets/virtual-ip-host-video.mp4'}
         poster={media?.posterUrl}
         muted={muted}
         playsInline
@@ -1215,7 +1219,7 @@ function GeneratedImagePrompt({ id, data }: { id: string; data: CanvasNodeData }
         <PromptAssetTray assets={data.promptAssets} onRemove={(assetId) => updateNode(id, { promptAssets: (data.promptAssets ?? []).filter((asset) => asset.id !== assetId) })} />
         <div ref={promptEditorRef} className={`prompt-rich-editor ${draft.trim() ? '' : 'is-empty'}`} role="textbox" aria-label="图片 Prompt" aria-multiline="true" contentEditable suppressContentEditableWarning onInput={syncPromptEditor}>{promptContent}</div>
         <span className="video-prompt-count">{draft.length} / 3000</span>
-        {params.webSearch && <span className="search-mock-badge" title="来源：示例素材库、公开摄影集、城市光影样例" aria-label="Mock 资料 3 条，来源为示例素材库、公开摄影集和城市光影样例"><Globe2 size={12} />Mock 资料 3 条</span>}
+        {params.webSearch && <span className="search-mock-badge" title="来源：Node 素材库、公开摄影集、城市光影样例" aria-label="Mock 资料 3 条，来源为 Node 素材库、公开摄影集和城市光影样例"><Globe2 size={12} />Mock 资料 3 条</span>}
         <QuickReferenceMenu open={quickReferenceOpen} onClose={() => setQuickReferenceOpen(false)} onSelect={selectPromptAsset} />
       </div>
       <footer className="image-config-footer generation-config-footer">
@@ -1529,7 +1533,7 @@ function operationStyle(data: CanvasNodeData): CSSProperties {
 function imageSurfaceRatio(data: CanvasNodeData) {
   const result = data.imageOperation
   const composition = result?.editorComposition
-  if (!(data.content ?? '').trim() && !data.media?.url && !composition?.renderedDataUrl) return '1 / 1'
+  if (!(data.content ?? '').trim() && !data.media?.url && !composition?.renderedDataUrl) return '4 / 3'
   if (result?.operation === 'grid-split') {
     const columns = result.gridColumns ?? result.grid ?? 1
     const rows = result.gridRows ?? result.grid ?? 1
@@ -1601,15 +1605,16 @@ export function MediaErrorState({ error, onRetry }: { error?: string; onRetry: (
 function MediaGenerationProgress({ progress }: { progress?: number }) {
   const value = Math.min(99, Math.max(2, Math.round(progress ?? 2)))
   return <div className="media-generation-progress" role="status" aria-label={`生成中 ${value}%`}>
-    <strong>生成中 {value}%</strong>
+    <strong><ShinyText text={`生成中 ${value}%`} speed={1.7} color="#c7c1ba" shineColor="#ffffff" spread={96} /></strong>
   </div>
 }
 
 export const ImageNode = memo(function ImageNode({ id, data, selected }: NodeProps<CanvasFlowNode>) {
-  const { updateNode, notify, retryGeneration, interactionMode, isInteractionCandidate, addPromptMarker, markersForSource, hoveredPromptMarkerId, hoverPromptMarker, selectedItemCount, isConnectionTargetCandidate } = useCanvasActions()
+  const { updateNode, notify, retryGeneration, interactionMode, isInteractionCandidate, addPromptMarker, markersForSource, hoveredPromptMarkerId, hoverPromptMarker, selectedItemCount, isConnectionTargetCandidate, uploadNodeMedia } = useCanvasActions()
   const [previewOpen, setPreviewOpen] = useState(false)
   const [activeTool, setActiveTool] = useState<Exclude<ImageOperation, 'prompt-regenerate'> | null>(null)
   const replaceInputRef = useRef<HTMLInputElement>(null)
+  const uploadInputRef = useRef<HTMLInputElement>(null)
   const nodeRef = useRef<HTMLElement>(null)
   const overlayVariables = useStableOverlayVariables()
   const pendingUpscale = data.status === 'ready' && data.imageOperation?.operation === 'upscale'
@@ -1659,6 +1664,7 @@ export const ImageNode = memo(function ImageNode({ id, data, selected }: NodePro
       <ConnectionHandles nodeId={id} />
       {focused && hasContent && !isGenerating && !pendingImageEditor && <ImageToolbar id={id} data={data} activeTool={activeTool} onTool={(tool) => setActiveTool((current) => current === tool ? null : tool)} onExpand={() => setPreviewOpen(true)} />}
       <NodeHeader id={id} data={data} icon={<ImageIcon size={13} />} />
+      {focused && !hasContent && !isGenerating && data.status !== 'failed' && !pendingUpscale && <><button type="button" className="empty-node-upload nodrag" onClick={() => uploadInputRef.current?.click()}><Upload size={14} />上传</button><input ref={uploadInputRef} className="sr-only" type="file" accept="image/*" aria-label="上传图片到当前节点" onChange={(event) => { const file = event.target.files?.[0]; if (file) uploadNodeMedia(id, file); event.currentTarget.value = '' }} /></>}
       <div className="node-surface image-surface" style={{ aspectRatio: visualRatio }} onClick={(event) => {
         if (interactionMode?.kind !== 'marker' || !isInteractionCandidate(id)) return
         event.stopPropagation()
@@ -1703,9 +1709,9 @@ function VideoReferenceSlot({ label, reference, onSelect }: { label: string; ref
 }
 
 const builtInSeedanceAssets = [
-  { id: 'seedance-host', title: '品牌主播 · 合规', type: 'image' as const, posterUrl: mediaAsset('virtual-ip-portrait.jpg') },
-  { id: 'seedance-city', title: '樱花城市 · 合规', type: 'image' as const, posterUrl: mediaAsset('generated-anime.png') },
-  { id: 'seedance-landscape', title: '横屏广告片 · 合规', type: 'video' as const, posterUrl: mediaAsset('demo-landscape-video-poster.jpg') },
+  { id: 'seedance-host', title: '品牌主播 · 合规', type: 'image' as const, posterUrl: '/node-canvas-prototype/assets/virtual-ip-portrait.jpg' },
+  { id: 'seedance-city', title: '樱花城市 · 合规', type: 'image' as const, posterUrl: '/node-canvas-prototype/assets/generated-anime.png' },
+  { id: 'seedance-landscape', title: '横屏广告片 · 合规', type: 'video' as const, posterUrl: '/node-canvas-prototype/assets/demo-landscape-video-poster.jpg' },
   { id: 'seedance-voice', title: '品牌女声 · 合规', type: 'audio' as const },
 ]
 
@@ -1855,7 +1861,7 @@ function VideoOperationConfig({ id, data }: { id: string; data: CanvasNodeData }
   const copy = videoOperationLabels[operationData.operation]
   const sourceSuperResolution = operationData.operation === 'super-resolution' ? operationData : undefined
   const sourceInterpolation = operationData.operation === 'frame-interpolation' ? operationData : undefined
-  const [model, setModel] = useState<'base' | 'topaz'>(sourceSuperResolution?.model ?? 'base')
+  const [model, setModel] = useState<'node' | 'topaz'>(sourceSuperResolution?.model ?? 'node')
   const [scale, setScale] = useState<2 | 4>(sourceSuperResolution?.scale ?? 2)
   const [targetFps, setTargetFps] = useState<50 | 60 | 90 | 120>(sourceInterpolation?.targetFps ?? 50)
   const complete = () => {
@@ -1866,7 +1872,7 @@ function VideoOperationConfig({ id, data }: { id: string; data: CanvasNodeData }
   return (
     <section className={`video-operation-config node-panel zoom-stable-ui nodrag nowheel operation-${operationData.operation}`} aria-label={`${copy.title}配置`}>
       <header><span><strong>{copy.title}</strong><small>{copy.description}</small></span><button type="button" aria-label={`取消${copy.title}`} title="取消" onClick={() => actions.cancelPendingVideoOperation ? actions.cancelPendingVideoOperation(id) : actions.notify('可使用撤销取消本次处理')}><X size={15} /></button></header>
-      {operationData.operation === 'super-resolution' && <><div className="video-model-segments" role="group" aria-label="选择超分模型"><button type="button" className={model === 'base' ? 'active' : ''} onClick={() => setModel('base')}>基础模型 · 视频超分</button><button type="button" className={model === 'topaz' ? 'active' : ''} onClick={() => setModel('topaz')}>Topaz Labs</button></div><p className="video-operation-note">当前分辨率：<strong>{data.media?.width ?? 1248} × {data.media?.height ?? 1664}</strong></p>{model === 'topaz' && <div className="video-scale-options"><span>超清倍数</span>{([2, 4] as const).map((value) => <button type="button" key={value} className={scale === value ? 'active' : ''} onClick={() => setScale(value)}>{value}x</button>)}</div>}</>}
+      {operationData.operation === 'super-resolution' && <><div className="video-model-segments" role="group" aria-label="选择超分模型"><button type="button" className={model === 'node' ? 'active' : ''} onClick={() => setModel('node')}>基础模型 · 视频超分</button><button type="button" className={model === 'topaz' ? 'active' : ''} onClick={() => setModel('topaz')}>Topaz Labs</button></div><p className="video-operation-note">当前分辨率：<strong>{data.media?.width ?? 1248} × {data.media?.height ?? 1664}</strong></p>{model === 'topaz' && <div className="video-scale-options"><span>超清倍数</span>{([2, 4] as const).map((value) => <button type="button" key={value} className={scale === value ? 'active' : ''} onClick={() => setScale(value)}>{value}x</button>)}</div>}</>}
       {operationData.operation === 'frame-interpolation' && <div className="video-fps-panel"><div><strong>目标帧率</strong><small>帧率越高，画面越流畅</small></div><div role="group" aria-label="目标帧率">{([50, 60, 90, 120] as const).map((fps) => <button type="button" key={fps} className={targetFps === fps ? 'active' : ''} onClick={() => setTargetFps(fps)}>{fps}fps</button>)}</div></div>}
       {operationData.operation === 'subtitle-removal' && <div className="subtitle-removal-summary"><span><CaptionsOff size={20} /></span><p><strong>智能检测字幕区域</strong><small>将从当前视频节点识别硬字幕，并生成无字幕版本。</small></p><Check size={16} /></div>}
       <footer><span className="generation-cost"><span className="chestnut-dot" />{videoOperationCost(operationData.operation)}</span><button type="button" className="video-primary-action" onClick={complete}>立即生成</button></footer>
@@ -2165,13 +2171,14 @@ function VideoToolbar({ id, data, onExpand, onLipSync }: { id: string; data: Can
   const [moreOpen, setMoreOpen] = useState(false)
   const moreButtonRef = useRef<HTMLButtonElement>(null)
   const runOperation = (operation: VideoOperationKind) => { setMoreOpen(false); actions.prepareVideoOperation(id, operation) }
-  return <div className="video-toolbar media-toolbar zoom-stable-ui nodrag" role="toolbar" aria-label="视频节点工具"><IconAction label="视频超分" onClick={() => runOperation('super-resolution')}><MonitorUp size={15} /></IconAction><IconAction label="视频补帧" onClick={() => runOperation('frame-interpolation')}><Gauge size={15} /></IconAction><IconAction label="对口型" onClick={onLipSync}><ScanFace size={15} /></IconAction><IconAction label="视频编辑" onClick={() => runOperation('edit')}><Scissors size={15} /></IconAction><span className="toolbar-divider" /><div><IconAction buttonRef={moreButtonRef} label="更多视频工具" active={moreOpen} onClick={() => setMoreOpen((open) => !open)}><MoreHorizontal size={16} /></IconAction><AnchoredPopover anchorRef={moreButtonRef} open={moreOpen} onClose={() => setMoreOpen(false)} className="toolbar-menu video-more-menu" align="end"><div role="menu"><button type="button" onClick={(event) => { event.stopPropagation(); runOperation('subtitle-removal') }}><CaptionsOff size={14} />字幕擦除</button><button type="button" className="seedance-compliance-menu-item" onClick={(event) => { event.stopPropagation(); setMoreOpen(false); verifySeedance() }}><ShieldCheck size={14} />Seedance 2.0 合规验证</button></div></AnchoredPopover></div><span className="toolbar-divider" /><PinControl id={id} value={data.pinColor} /><MediaDownloadAction label="下载视频" filename={`${data.title}.${mediaFileExtension(data.media, 'video')}`} href={data.media?.url ?? mediaAsset('virtual-ip-host-video.mp4')}><Download size={15} /></MediaDownloadAction><IconAction label="全屏预览" onClick={onExpand}><Expand size={15} /></IconAction></div>
+  return <div className="video-toolbar media-toolbar zoom-stable-ui nodrag" role="toolbar" aria-label="视频节点工具"><IconAction label="视频超分" onClick={() => runOperation('super-resolution')}><MonitorUp size={15} /></IconAction><IconAction label="视频补帧" onClick={() => runOperation('frame-interpolation')}><Gauge size={15} /></IconAction><IconAction label="对口型" onClick={onLipSync}><ScanFace size={15} /></IconAction><IconAction label="视频编辑" onClick={() => runOperation('edit')}><Scissors size={15} /></IconAction><span className="toolbar-divider" /><div><IconAction buttonRef={moreButtonRef} label="更多视频工具" active={moreOpen} onClick={() => setMoreOpen((open) => !open)}><MoreHorizontal size={16} /></IconAction><AnchoredPopover anchorRef={moreButtonRef} open={moreOpen} onClose={() => setMoreOpen(false)} className="toolbar-menu video-more-menu" align="end"><div role="menu"><button type="button" onClick={(event) => { event.stopPropagation(); runOperation('subtitle-removal') }}><CaptionsOff size={14} />字幕擦除</button><button type="button" className="seedance-compliance-menu-item" onClick={(event) => { event.stopPropagation(); setMoreOpen(false); verifySeedance() }}><ShieldCheck size={14} />Seedance 2.0 合规验证</button></div></AnchoredPopover></div><span className="toolbar-divider" /><PinControl id={id} value={data.pinColor} /><MediaDownloadAction label="下载视频" filename={`${data.title}.${mediaFileExtension(data.media, 'video')}`} href={data.media?.url ?? '/node-canvas-prototype/assets/virtual-ip-host-video.mp4'}><Download size={15} /></MediaDownloadAction><IconAction label="全屏预览" onClick={onExpand}><Expand size={15} /></IconAction></div>
 }
 
 export const VideoNode = memo(function VideoNode({ id, data, selected }: NodeProps<CanvasFlowNode>) {
-  const { retryGeneration, updateNode, notify, selectedItemCount, isConnectionTargetCandidate, interactionMode, isInteractionCandidate } = useCanvasActions()
+  const { retryGeneration, updateNode, notify, selectedItemCount, isConnectionTargetCandidate, interactionMode, isInteractionCandidate, uploadNodeMedia } = useCanvasActions()
   const [previewOpen, setPreviewOpen] = useState(false)
   const [lipSyncOpen, setLipSyncOpen] = useState(false)
+  const uploadInputRef = useRef<HTMLInputElement>(null)
   const nodeRef = useRef<HTMLElement>(null)
   const overlayVariables = useStableOverlayVariables()
   const pendingOperation = data.status === 'ready' ? data.videoOperation as PendingVideoOperation | undefined : undefined
@@ -2210,7 +2217,8 @@ export const VideoNode = memo(function VideoNode({ id, data, selected }: NodePro
     <VideoOperationOutputHandle />
     {focused && hasContent && !pendingOperation && <VideoToolbar id={id} data={data} onExpand={() => setPreviewOpen(true)} onLipSync={() => setLipSyncOpen((open) => !open)} />}
     <NodeHeader id={id} data={data} icon={<Video size={13} />} />
-      <div className="node-surface video-preview">
+    {focused && !hasResult && data.status !== 'failed' && !pendingOperation && <><button type="button" className="empty-node-upload nodrag" onClick={() => uploadInputRef.current?.click()}><Upload size={14} />上传</button><input ref={uploadInputRef} className="sr-only" type="file" accept="video/*" aria-label="上传视频到当前节点" onChange={(event) => { const file = event.target.files?.[0]; if (file) uploadNodeMedia(id, file); event.currentTarget.value = '' }} /></>}
+    <div className="node-surface video-preview">
         {!hasResult && data.status !== 'failed' && <div className="video-empty"><span>{pendingOperation ? <WandSparkles size={21} /> : <Play size={21} />}</span>{pendingOperation ? <strong>{videoOperationLabels[pendingOperation.operation].title}</strong> : <strong className="sr-only">视频</strong>}</div>}
         {hasContent && !isGenerating && <VideoPlayer label={`${data.title}视频播放器`} media={data.media} compact />}
         {data.status === 'failed' && <MediaErrorState error={data.error} onRetry={() => retryGeneration(id)} />}
@@ -2225,63 +2233,272 @@ export const VideoNode = memo(function VideoNode({ id, data, selected }: NodePro
   </article>
 })
 
-function AudioConfig({ id, data }: { id: string; data: CanvasNodeData }) {
-  const { updateNode, runGeneration, beginReferenceSelection } = useCanvasActions()
-  const definition = generationDefinitions.find((item) => item.nodeType === 'audio')!
-  const mode = definition.modes.find((item) => item.id === data.modeId) ?? definition.modes[0]
-  const model = mode.models.find((item) => item.id === data.modelId) ?? mode.models[0]
-  const params = data.params ?? {}
-  const changeMode = (modeId: string) => {
-    const nextMode = definition.modes.find((item) => item.id === modeId)!
-    const nextModel = nextMode.models[0]
-    updateNode(id, {
-      modeId: nextMode.id,
-      modelId: nextModel.id,
-      params: Object.fromEntries(nextModel.parameters.map((parameter) => [parameter.id, parameter.defaultValue])),
-    })
-  }
-  return (
-    <section className="audio-config node-panel zoom-stable-ui nodrag nowheel" aria-label="音频生成配置">
-      <ReferenceStrip targetId={id} references={data.references} onAdd={() => beginReferenceSelection(id)} />
-      <textarea aria-label="音频补充 Prompt" placeholder="补充声音、节奏或情绪要求" value={data.localPrompt ?? ''} onChange={(event) => updateNode(id, { localPrompt: event.target.value })} />
-      <footer>
-        <select aria-label="音频生成模式" value={mode.id} onChange={(event) => changeMode(event.target.value)}>{definition.modes.map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}</select>
-        <select aria-label="音频模型" value={model.id} onChange={(event) => updateNode(id, { modelId: event.target.value })}>{mode.models.map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}</select>
-        {model.parameters.map((parameter) => <ParameterControl key={parameter.id} parameter={parameter} value={params[parameter.id]} onChange={(value) => updateNode(id, { params: { ...params, [parameter.id]: value } })} />)}
-        <span className="panel-spacer" />
-        <span className="generation-cost"><span className="chestnut-dot" />{data.cost ?? 12}</span>
-        <button type="button" className="generate-button" onClick={() => runGeneration(id)} disabled={data.status === 'queued' || data.status === 'running'} aria-label="生成音频">{data.status === 'queued' || data.status === 'running' ? <Pause size={16} /> : <ArrowUp size={17} />}</button>
-      </footer>
-    </section>
-  )
+const waveform = [12, 20, 28, 18, 34, 26, 14, 31, 22, 36, 18, 28, 16, 24, 13, 32, 20, 26]
+const audioModels = generationDefinitions.find((item) => item.nodeType === 'audio')!.modes.flatMap((mode) => mode.models)
+const audioPauseOptions = [.25, .5, 1, 1.5] as const
+const audioToneOptions = ['笑声', '轻笑', '咳嗽', '清嗓子', '呻吟', '正常换气', '喘气', '吸气', '呼气', '倒吸气', '吸鼻子', '叹气', '喷鼻息', '打嗝', '哼唱', '鼾声', '嗯', '喷嚏']
+
+function formatAudioTime(seconds: number) {
+  const value = Math.max(0, Number.isFinite(seconds) ? seconds : 0)
+  const wholeSeconds = Math.floor(value + 1e-6)
+  return `${String(Math.floor(wholeSeconds / 60)).padStart(2, '0')}:${String(wholeSeconds % 60).padStart(2, '0')}`
 }
 
-const waveform = [12, 20, 28, 18, 34, 26, 14, 31, 22, 36, 18, 28, 16, 24, 13, 32, 20, 26]
+function AudioAdvancedSettings({ anchorRef, open, onClose, params, onChange }: {
+  anchorRef: RefObject<HTMLButtonElement | null>
+  open: boolean
+  onClose: () => void
+  params: Record<string, string | number | boolean>
+  onChange: (patch: Record<string, number>) => void
+}) {
+  const value = (key: string, fallback: number) => typeof params[key] === 'number' ? params[key] : fallback
+  return <AnchoredPopover anchorRef={anchorRef} open={open} onClose={onClose} className="audio-advanced-popover" align="end" placement="top">
+    <div aria-label="音频高级设置">
+      <header><strong>高级设置</strong><button type="button" onClick={() => onChange({ speed: 1, pitch: 0, volume: 0, timbre: 0, warmth: 0, clarity: 0 })}>重置</button></header>
+      <section><strong>基础调节</strong><RangeField label="语速" value={value('speed', 1)} min={.5} max={1.5} step={.1} onChange={(speed) => onChange({ speed })} /><RangeField label="音调" value={value('pitch', 0)} min={-12} max={12} onChange={(pitch) => onChange({ pitch })} /><RangeField label="音量" value={value('volume', 0)} min={-12} max={12} onChange={(volume) => onChange({ volume })} /></section>
+      <section><strong>音色效果调节</strong><RangeField label="低沉-明亮" value={value('timbre', 0)} min={-10} max={10} onChange={(timbre) => onChange({ timbre })} /><RangeField label="力量-柔和" value={value('warmth', 0)} min={-10} max={10} onChange={(warmth) => onChange({ warmth })} /><RangeField label="磁性-清脆" value={value('clarity', 0)} min={-10} max={10} onChange={(clarity) => onChange({ clarity })} /></section>
+    </div>
+  </AnchoredPopover>
+}
+
+export function AudioTrimEditor({ id, duration, sourceUrl, onCancel }: { id: string; duration: number; sourceUrl?: string; onCancel: () => void }) {
+  const { createAudioTrimDerivative } = useCanvasActions()
+  const safeDuration = Math.max(duration, .2)
+  const minimumLength = Math.min(.1, safeDuration)
+  const [start, setStart] = useState(() => safeDuration * .25)
+  const [end, setEnd] = useState(() => safeDuration * .75)
+  const [previewPosition, setPreviewPosition] = useState(() => safeDuration * .25)
+  const [previewPlaying, setPreviewPlaying] = useState(false)
+  const previewAudioRef = useRef<HTMLAudioElement>(null)
+  const dragRef = useRef<{
+    kind: 'start' | 'end' | 'selection'
+    pointerTime: number
+    start: number
+    end: number
+  } | null>(null)
+  const updateStart = (value: number) => setStart(Math.min(Math.max(value, 0), end - minimumLength))
+  const updateEnd = (value: number) => setEnd(Math.max(Math.min(value, safeDuration), start + minimumLength))
+  const selectionDuration = end - start
+  useEffect(() => {
+    setPreviewPosition((current) => current < start || current > end ? start : current)
+    const audio = previewAudioRef.current
+    if (audio && (audio.currentTime < start || audio.currentTime > end)) audio.currentTime = start
+  }, [end, start])
+  useEffect(() => {
+    if (!previewPlaying || sourceUrl) return undefined
+    const timer = window.setInterval(() => {
+      setPreviewPosition((current) => {
+        const next = current + .25
+        if (next >= end) {
+          setPreviewPlaying(false)
+          return start
+        }
+        return next
+      })
+    }, 250)
+    return () => window.clearInterval(timer)
+  }, [end, previewPlaying, sourceUrl, start])
+  const timeFromPointer = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
+    const rect = event.currentTarget.getBoundingClientRect()
+    if (!rect.width) return 0
+    return Math.min(safeDuration, Math.max(0, (event.clientX - rect.left) / rect.width * safeDuration))
+  }, [safeDuration])
+  const updateFromPointer = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
+    const drag = dragRef.current
+    if (!drag) return
+    const time = timeFromPointer(event)
+    if (drag.kind === 'start') {
+      setStart(Math.min(Math.max(time, 0), drag.end - minimumLength))
+      return
+    }
+    if (drag.kind === 'end') {
+      setEnd(Math.max(Math.min(time, safeDuration), drag.start + minimumLength))
+      return
+    }
+    const length = drag.end - drag.start
+    const nextStart = Math.min(Math.max(drag.start + time - drag.pointerTime, 0), safeDuration - length)
+    setStart(nextStart)
+    setEnd(nextStart + length)
+  }, [minimumLength, safeDuration, timeFromPointer])
+  const beginPointerDrag = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
+    event.preventDefault()
+    event.stopPropagation()
+    const time = timeFromPointer(event)
+    const handleTolerance = Math.max(safeDuration * .04, .18)
+    const kind = Math.abs(time - start) <= handleTolerance
+      ? 'start'
+      : Math.abs(time - end) <= handleTolerance
+        ? 'end'
+        : time > start && time < end
+          ? 'selection'
+          : time < start ? 'start' : 'end'
+    dragRef.current = { kind, pointerTime: time, start, end }
+    event.currentTarget.setPointerCapture(event.pointerId)
+    updateFromPointer(event)
+  }, [end, safeDuration, start, timeFromPointer, updateFromPointer])
+  const endPointerDrag = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
+    updateFromPointer(event)
+    dragRef.current = null
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId)
+  }, [updateFromPointer])
+  const adjustHandle = (handle: 'start' | 'end', event: React.KeyboardEvent<HTMLButtonElement>) => {
+    const delta = event.key === 'ArrowLeft' ? -.05 : event.key === 'ArrowRight' ? .05 : 0
+    if (!delta) return
+    event.preventDefault()
+    event.stopPropagation()
+    if (handle === 'start') updateStart(start + delta)
+    else updateEnd(end + delta)
+  }
+  const togglePreview = () => {
+    const audio = previewAudioRef.current
+    if (!audio) return setPreviewPlaying((playing) => !playing)
+    if (previewPlaying) {
+      audio.pause()
+      setPreviewPlaying(false)
+      return
+    }
+    const nextPosition = previewPosition < start || previewPosition >= end ? start : previewPosition
+    audio.currentTime = nextPosition
+    void audio.play().then(() => setPreviewPlaying(true)).catch(() => setPreviewPlaying(false))
+  }
+  const handleNativePreviewTimeUpdate = (event: React.SyntheticEvent<HTMLAudioElement>) => {
+    const audio = event.currentTarget
+    if (audio.currentTime >= end) {
+      audio.pause()
+      audio.currentTime = start
+      setPreviewPosition(start)
+      setPreviewPlaying(false)
+      return
+    }
+    setPreviewPosition(Math.max(start, audio.currentTime))
+  }
+  return <div className="audio-trim-editor nodrag nowheel" aria-label="裁剪音频">
+    {sourceUrl && <audio ref={previewAudioRef} className="audio-native-source" src={sourceUrl} preload="metadata" aria-label="裁剪试听音频" onLoadedMetadata={(event) => { event.currentTarget.currentTime = start; setPreviewPosition(start) }} onTimeUpdate={handleNativePreviewTimeUpdate} onPause={() => setPreviewPlaying(false)} onEnded={() => { setPreviewPosition(start); setPreviewPlaying(false) }} />}
+    <div className="audio-trim-waveform" aria-label="裁剪音频波形" style={{ '--trim-start': `${start / safeDuration * 100}%`, '--trim-end': `${end / safeDuration * 100}%` } as CSSProperties} onPointerDown={beginPointerDrag} onPointerMove={updateFromPointer} onPointerUp={endPointerDrag} onPointerCancel={endPointerDrag}>
+      <div className="audio-wave-bars" aria-hidden="true">{[...waveform, ...waveform].map((height, index) => <i key={index} style={{ height }} />)}</div>
+      <div className="audio-trim-selection" aria-hidden="true"><span>{selectionDuration.toFixed(2)} s</span></div>
+      <span className="audio-trim-playhead" aria-hidden="true" style={{ left: `${previewPosition / safeDuration * 100}%` }} />
+      <button type="button" className="audio-trim-handle handle-start" aria-label="裁剪开始位置" aria-valuetext={formatAudioTime(start)} onKeyDown={(event) => adjustHandle('start', event)} />
+      <button type="button" className="audio-trim-handle handle-end" aria-label="裁剪结束位置" aria-valuetext={formatAudioTime(end)} onKeyDown={(event) => adjustHandle('end', event)} />
+    </div>
+    <footer><button type="button" className="audio-trim-cancel" onClick={onCancel}><X size={14} />取消裁剪</button><button type="button" className="audio-trim-preview" aria-label={previewPlaying ? '暂停试听裁剪片段' : '试听裁剪片段'} onClick={togglePreview}>{previewPlaying ? <Pause size={13} fill="currentColor" /> : <Play size={13} fill="currentColor" />}</button><button type="button" className="audio-trim-confirm" onClick={() => createAudioTrimDerivative(id, { operation: 'trim', start, end })}>生成</button></footer>
+  </div>
+}
+
+function AudioPlayer({ data }: { data: CanvasNodeData }) {
+  const duration = Math.max(data.media?.duration ?? data.duration ?? 12, .2)
+  const [position, setPosition] = useState(0)
+  const [playing, setPlaying] = useState(false)
+  const audioRef = useRef<HTMLAudioElement>(null)
+  useEffect(() => {
+    if (!playing || data.media?.url) return undefined
+    const timer = window.setInterval(() => setPosition((current) => current >= duration ? 0 : Math.min(duration, current + .25)), 250)
+    return () => window.clearInterval(timer)
+  }, [data.media?.url, duration, playing])
+  useEffect(() => setPosition((current) => Math.min(current, duration)), [duration])
+  const seek = (nextPosition: number) => {
+    setPosition(nextPosition)
+    if (audioRef.current) audioRef.current.currentTime = nextPosition
+  }
+  const togglePlayback = () => {
+    const audio = audioRef.current
+    if (!audio) return setPlaying((current) => !current)
+    if (playing) {
+      audio.pause()
+      setPlaying(false)
+      return
+    }
+    if (position >= duration) audio.currentTime = 0
+    void audio.play().then(() => setPlaying(true)).catch(() => setPlaying(false))
+  }
+  return <div className="audio-player" style={{ '--audio-progress': `${position / duration * 100}%` } as CSSProperties}>
+    {data.media?.url && <audio ref={audioRef} className="audio-native-source" src={data.media.url} preload="metadata" aria-label={`${data.title}音频`} onTimeUpdate={(event) => setPosition(Math.min(duration, event.currentTarget.currentTime))} onEnded={() => { setPosition(0); setPlaying(false) }} onPause={() => setPlaying(false)} />}
+    <div className="audio-waveform-stage nodrag nowheel"><div className="audio-wave-bars" aria-hidden="true">{[...waveform, ...waveform].map((height, index) => <i key={index} style={{ height }} />)}</div><span className="audio-playhead" aria-hidden="true" /><input className="nodrag nowheel" type="range" min={0} max={duration} step={.05} value={position} onChange={(event) => seek(Number(event.target.value))} aria-label="音频播放进度" /></div>
+    <footer className="audio-player-controls nodrag nowheel"><span>{formatAudioTime(position)} / {formatAudioTime(duration)}</span><button type="button" aria-label={playing ? '暂停音频' : '播放音频'} onClick={togglePlayback}>{playing ? <Pause size={15} fill="currentColor" /> : <Play size={15} fill="currentColor" />}</button><i aria-hidden="true" /></footer>
+  </div>
+}
+
+export function AudioConfig({ id, data }: { id: string; data: CanvasNodeData }) {
+  const { updateNode, runGeneration, beginReferenceSelection } = useCanvasActions()
+  const params = data.params ?? {}
+  const model = audioModels.find((item) => item.id === data.modelId) ?? audioModels[0]
+  const isMureka = model.id === 'mureka-9'
+  const isSpeech = model.id === 'minimax-speech-2.8'
+  const [voicePickerOpen, setVoicePickerOpen] = useState(false)
+  const [settingsOpen, setSettingsOpen] = useState(false)
+  const [pauseOpen, setPauseOpen] = useState(false)
+  const [toneOpen, setToneOpen] = useState(false)
+  const settingsButtonRef = useRef<HTMLButtonElement>(null)
+  const pauseButtonRef = useRef<HTMLButtonElement>(null)
+  const toneButtonRef = useRef<HTMLButtonElement>(null)
+  const busy = data.status === 'queued' || data.status === 'running'
+  const lyricMode = typeof params.lyricMode === 'string' ? params.lyricMode : 'smart'
+  const musicType = typeof params.musicType === 'string' ? params.musicType : 'music'
+  const voiceId = typeof params.voiceId === 'string' ? params.voiceId : 'elegant-senior'
+  const voiceLabel = typeof params.voiceLabel === 'string' ? params.voiceLabel : '淡雅学姐'
+  const setParams = (patch: Record<string, string | number | boolean>) => updateNode(id, { params: { ...params, ...patch } })
+  const setModel = (modelId: string) => {
+    const next = audioModels.find((item) => item.id === modelId) ?? audioModels[0]
+    updateNode(id, {
+      modeId: 'audio-generate',
+      modelId: next.id,
+      params: {
+        ...Object.fromEntries(next.parameters.map((parameter) => [parameter.id, parameter.defaultValue])),
+        ...(next.id === 'minimax-speech-2.8' ? { voiceId: 'elegant-senior', voiceLabel: '淡雅学姐' } : {}),
+      },
+    })
+  }
+  const appendToken = (token: string) => updateNode(id, { localPrompt: `${data.localPrompt ?? ''}${(data.localPrompt ?? '').trim() ? ' ' : ''}${token}` })
+  return <section className={`audio-config node-panel zoom-stable-ui nodrag nowheel model-${model.id}`} aria-label="音频生成配置">
+    {!isSpeech && <div className="audio-reference-actions" aria-label="音频参考与音色">
+      {(data.references ?? []).map((reference) => <ReferenceChip key={reference.nodeId} targetId={id} reference={reference} />)}
+      <button type="button" onClick={() => beginReferenceSelection(id)}><Plus size={14} />音频</button>
+      {!isMureka && <button type="button" onClick={() => setVoicePickerOpen(true)}><Plus size={14} />音色库</button>}
+    </div>}
+    <div className="audio-prompt-composer">
+      {isSpeech && <div className="audio-speech-tokens"><button ref={pauseButtonRef} type="button" onClick={() => { setPauseOpen((open) => !open); setToneOpen(false) }}>停顿</button><button ref={toneButtonRef} type="button" onClick={() => { setToneOpen((open) => !open); setPauseOpen(false) }}>语气词</button><AnchoredPopover anchorRef={pauseButtonRef} open={pauseOpen} onClose={() => setPauseOpen(false)} className="audio-token-menu" align="start" placement="top"><div role="menu" aria-label="选择停顿秒数">{audioPauseOptions.map((seconds) => <button type="button" key={seconds} onClick={() => { appendToken(`[停顿 ${seconds}s]`); setPauseOpen(false) }}>{seconds}s</button>)}</div></AnchoredPopover><AnchoredPopover anchorRef={toneButtonRef} open={toneOpen} onClose={() => setToneOpen(false)} className="audio-tone-menu" align="start" placement="top"><div role="menu" aria-label="选择语气词">{audioToneOptions.map((tone) => <button type="button" key={tone} onClick={() => { appendToken(`[${tone}]`); setToneOpen(false) }}>{tone}</button>)}</div></AnchoredPopover></div>}
+      <textarea maxLength={isMureka ? 1024 : 3000} aria-label="音频生成提示词" placeholder={isMureka ? '输入风格、情绪、乐器等信息来生成音乐' : isSpeech ? '输入要合成的文本，可插入停顿和语气词' : '输入效果提示词和合成文本，支持上传参考音频'} value={data.localPrompt ?? ''} onChange={(event) => updateNode(id, { localPrompt: event.target.value })} />
+      {isMureka && lyricMode === 'fixed' && <textarea maxLength={3000} className="audio-lyrics-input" aria-label="固定歌词" placeholder="在此输入或粘贴歌词…" value={typeof params.lyrics === 'string' ? params.lyrics : ''} onChange={(event) => setParams({ lyrics: event.target.value })} />}
+      <span className="audio-prompt-count">{(data.localPrompt ?? '').length} / {isMureka ? 1024 : 3000}</span>
+    </div>
+    <footer>
+      <span className="audio-config-mode">音频生成</span>
+      <label className="audio-model-select"><span className="sr-only">音频模型</span><select aria-label="音频模型" value={model.id} onChange={(event) => setModel(event.target.value)}>{audioModels.map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}</select></label>
+      {isMureka && <><label className="audio-compact-select"><span className="sr-only">音乐类型</span><select aria-label="音乐类型" value={musicType} onChange={(event) => setParams({ musicType: event.target.value })}><option value="music">音乐</option><option value="score">配乐</option></select></label><label className="audio-compact-select"><span className="sr-only">歌词模式</span><select aria-label="歌词模式" value={lyricMode} onChange={(event) => setParams({ lyricMode: event.target.value })}><option value="smart">智能模式</option><option value="fixed">固定歌词</option><option value="instrumental">纯音乐</option></select></label></>}
+      {isSpeech && <button type="button" className="audio-voice-trigger" onClick={() => setVoicePickerOpen(true)} aria-label="选择音色">{voiceLabel}<ChevronDown size={12} /></button>}
+      {!isMureka && <><button ref={settingsButtonRef} type="button" className="audio-settings-trigger" onClick={() => setSettingsOpen((open) => !open)}><SlidersHorizontal size={14} />{isSpeech ? '高级设置' : '设置'}</button><AudioAdvancedSettings anchorRef={settingsButtonRef} open={settingsOpen} onClose={() => setSettingsOpen(false)} params={params} onChange={setParams} /></>}
+      <span className="panel-spacer" />
+      <span className="generation-cost"><span className="chestnut-dot" />{data.cost ?? 12}</span>
+      <button type="button" className="generate-button" onClick={() => runGeneration(id)} disabled={busy || (!(data.localPrompt ?? '').trim() && !(data.references?.length))} aria-label={busy ? '音频生成中' : '生成音频'}>{busy ? <Pause size={16} /> : <ArrowUp size={17} />}</button>
+    </footer>
+    {voicePickerOpen && <VoicePicker value={{ id: voiceId, label: voiceLabel }} onChange={(voice) => setParams({ voiceId: voice.id, voiceLabel: voice.label })} onClose={() => setVoicePickerOpen(false)} />}
+  </section>
+}
 
 export const AudioNode = memo(function AudioNode({ id, data, selected }: NodeProps<CanvasFlowNode>) {
-  const { notify, selectedItemCount, isConnectionTargetCandidate, interactionMode, isInteractionCandidate } = useCanvasActions()
+  const { notify, selectedItemCount, isConnectionTargetCandidate, interactionMode, isInteractionCandidate, uploadNodeMedia } = useCanvasActions()
   const verifySeedance = useSeedanceCompliance(id)
-  const [previewOpen, setPreviewOpen] = useState(false)
-  const [moreOpen, setMoreOpen] = useState(false)
-  const moreButtonRef = useRef<HTMLButtonElement>(null)
+  const [trimming, setTrimming] = useState(false)
+  const uploadInputRef = useRef<HTMLInputElement>(null)
+  const nodeRef = useRef<HTMLElement>(null)
   const overlayVariables = useStableOverlayVariables()
-  const durationLabel = useMemo(() => `0:${String(data.duration ?? 12).padStart(2, '0')}`, [data.duration])
-  const hasContent = Boolean((data.content ?? '').trim())
+  const duration = data.media?.duration ?? data.duration ?? 12
+  const hasContent = Boolean((data.content ?? '').trim() || data.media?.url)
   const focused = selected && selectedItemCount === 1
   const candidate = isConnectionTargetCandidate(id)
   const interactionClass = interactionNodeClass(id, interactionMode, isInteractionCandidate(id))
-  return (
-    <article className={`canvas-node audio-node ${selected ? 'is-selected' : ''} ${candidate ? 'is-connection-candidate' : ''} ${hasContent ? '' : 'is-empty'} ${interactionClass}`} style={overlayVariables}>
-      <ConnectionHandles nodeId={id} />
-      {focused && hasContent && <div className="media-toolbar compact-media-toolbar zoom-stable-ui nodrag"><div><IconAction buttonRef={moreButtonRef} label="更多音频工具" active={moreOpen} onClick={() => setMoreOpen((open) => !open)}><MoreHorizontal size={16} /></IconAction><AnchoredPopover anchorRef={moreButtonRef} open={moreOpen} onClose={() => setMoreOpen(false)} className="toolbar-menu audio-more-menu" align="start"><div role="menu"><button type="button" className="seedance-compliance-menu-item" onClick={() => { setMoreOpen(false); verifySeedance() }}><ShieldCheck size={14} />Seedance 2.0 合规验证</button></div></AnchoredPopover></div><PinControl id={id} value={data.pinColor} /><IconAction label="下载音频信息" onClick={() => { startDownload(`${data.title}.txt`, '', data.content ?? ''); notify('已下载音频信息') }}><Download size={15} /></IconAction><IconAction label="全屏预览" onClick={() => setPreviewOpen(true)}><Expand size={15} /></IconAction></div>}
-      <NodeHeader id={id} data={data} icon={<Waves size={13} />} />
-      <div className="node-surface audio-surface">
-        {hasContent ? <div className="audio-player nodrag"><button type="button" aria-label="播放音频"><Play size={15} fill="currentColor" /></button><div className="waveform" aria-hidden="true">{waveform.map((height, index) => <i key={index} style={{ height }} />)}</div><span>{durationLabel}</span></div> : <div className="empty-media-node empty-audio-node"><Music2 size={25} /><strong className="sr-only">音频</strong></div>}
-      </div>
-      {focused && <AudioConfig id={id} data={data} />}
-      <PreviewOverlay open={previewOpen} onClose={() => setPreviewOpen(false)} id={id} data={data} />
-    </article>
-  )
+  useEffect(() => { if (!focused) setTrimming(false) }, [focused])
+  useKeepNodeOverlayInViewport(nodeRef, focused && !trimming ? '.audio-config' : null)
+  return <article ref={nodeRef} className={`canvas-node audio-node ${selected ? 'is-selected' : ''} ${candidate ? 'is-connection-candidate' : ''} ${hasContent ? '' : 'is-empty'} ${trimming ? 'is-trimming' : ''} ${interactionClass}`} style={overlayVariables}>
+    <ConnectionHandles nodeId={id} />
+    {focused && hasContent && !trimming && <div className="media-toolbar compact-media-toolbar zoom-stable-ui nodrag"><IconAction label="裁剪音频" onClick={() => setTrimming(true)}><Scissors size={15} /></IconAction><IconAction label="Seedance 2.0 合规验证" onClick={verifySeedance}><ShieldCheck size={15} /></IconAction><span className="toolbar-divider" /><PinControl id={id} value={data.pinColor} /><IconAction label="下载音频" onClick={() => { startDownload(`${data.title}.txt`, '', data.content ?? ''); notify('已下载音频') }}><Download size={15} /></IconAction></div>}
+    <NodeHeader id={id} data={data} icon={<Waves size={13} />} draggable />
+    {focused && !hasContent && <><button type="button" className="empty-node-upload nodrag" onClick={() => uploadInputRef.current?.click()}><Upload size={14} />上传</button><input ref={uploadInputRef} className="sr-only" type="file" accept="audio/*,video/*" aria-label="上传音频或视频到当前节点" onChange={(event) => { const file = event.target.files?.[0]; if (file) uploadNodeMedia(id, file); event.currentTarget.value = '' }} /></>}
+    <div className="node-surface audio-surface">
+      {hasContent ? trimming ? <AudioTrimEditor id={id} duration={duration} sourceUrl={data.media?.url} onCancel={() => setTrimming(false)} /> : <AudioPlayer data={data} /> : <div className="empty-media-node empty-audio-node"><Music2 size={28} /><strong className="sr-only">音频</strong></div>}
+    </div>
+    {focused && !trimming && <AudioConfig id={id} data={data} />}
+  </article>
 })
 
 export const nodeTypes = { text: TextNode, image: ImageNode, video: VideoNode, audio: AudioNode }

@@ -53,4 +53,20 @@ describe('SmartPort', () => {
     expect(updateNodeInternals).toHaveBeenCalledTimes(2)
     expect(updateNodeInternals).toHaveBeenLastCalledWith('node-video')
   })
+
+  it('opens the context picker from the left-side launcher', () => {
+    const openContinuation = vi.fn()
+    const openContextAdd = vi.fn()
+    const { container } = render(
+      <CanvasActionContext.Provider value={{ openContinuation, openContextAdd } as never}>
+        <SmartPort nodeId="node-video" id="input" type="target" position={Position.Left} label="添加上下文" />
+      </CanvasActionContext.Provider>,
+    )
+
+    const launcher = container.querySelector<HTMLElement>('[data-handle-id="input-launcher"]')!
+    fireEvent.click(launcher, { clientX: 140, clientY: 96 })
+
+    expect(openContextAdd).toHaveBeenCalledWith('node-video', 140, 96)
+    expect(openContinuation).not.toHaveBeenCalled()
+  })
 })

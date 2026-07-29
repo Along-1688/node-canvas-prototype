@@ -11,8 +11,15 @@ import type {
 const targetMatrix: Record<MediaNodeType, MediaNodeType[]> = {
   text: ['text', 'image', 'video', 'audio'],
   image: ['text', 'image', 'video'],
-  audio: ['video'],
-  video: ['text', 'video'],
+  audio: ['audio', 'video'],
+  video: ['text', 'video', 'audio'],
+}
+
+const contextSourceMatrix: Record<MediaNodeType, MediaNodeType[]> = {
+  text: ['text', 'image'],
+  image: ['text', 'image'],
+  video: ['text', 'image', 'audio'],
+  audio: ['text'],
 }
 
 export function allowedTargetsForSource(sourceType: MediaNodeType) {
@@ -21,6 +28,11 @@ export function allowedTargetsForSource(sourceType: MediaNodeType) {
 
 export function isConnectionPairAllowed(sourceType: MediaNodeType, targetType: MediaNodeType) {
   return targetMatrix[sourceType].includes(targetType)
+}
+
+export function allowedContextSourcesForTarget(target: CanvasFlowNode) {
+  if (target.data.nodeType === 'image' && target.data.sourceKind === 'upload') return []
+  return [...contextSourceMatrix[target.data.nodeType]]
 }
 
 export function isSeedanceComplianceEligible(node: CanvasFlowNode) {

@@ -272,7 +272,7 @@ export const initialNodes: CanvasFlowNode[] = [
       params: { speed: 1, voiceId: 'elegant-senior', voiceLabel: '淡雅学姐' },
       duration: 3.816,
       cost: 12,
-      media: { url: '/node-canvas-prototype/assets/node-canvas-welcome.mp3', mimeType: 'audio/mpeg', duration: 3.816, hasAudio: true },
+      media: { url: '/node-canvas-prototype/assets/welcome-audio.mp3', mimeType: 'audio/mpeg', duration: 3.816, hasAudio: true },
     },
   },
   {

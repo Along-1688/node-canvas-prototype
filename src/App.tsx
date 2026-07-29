@@ -4268,7 +4268,7 @@ function CanvasPrototype() {
           <button type="button" className="ui-tooltip-control" data-tooltip="放大" onClick={() => zoomIn({ duration: 140 })} aria-label="放大"><Plus size={15} /></button>
         </div>
 
-        <div className="prototype-note"><Sparkles size={14} /><span>V1.9.9 交互原型 · Mock 数据</span></div>
+        <div className="prototype-note"><Sparkles size={14} /><span>V2.0 交互原型 · Mock 数据</span></div>
         {toast && <div className={`toast ${toast.includes('\n') ? 'has-detail' : ''}`} role="status" aria-live="polite">{toast.includes('\n') ? <><Check size={18} /><span><strong>{toast.split('\n')[0]}</strong><small>{toast.split('\n')[1]}</small></span></> : /任务已进入队列|生成中|处理中|等待执行|^正在/.test(toast) ? <ShinyText text={toast} speed={1.8} color="#393638" shineColor="#ffffff" spread={92} /> : toast}</div>}
       </main>
     </CanvasActionContext.Provider>

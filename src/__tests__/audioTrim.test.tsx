@@ -33,11 +33,11 @@ describe('AudioTrimEditor', () => {
   it('loads an audio source so the selected segment can be heard', () => {
     render(
       <CanvasActionContext.Provider value={{ createAudioTrimDerivative: vi.fn() } as never}>
-        <AudioTrimEditor id="audio-source" duration={3.816} sourceUrl="/node-canvas-prototype/assets/node-canvas-welcome.mp3" onCancel={vi.fn()} />
+        <AudioTrimEditor id="audio-source" duration={3.816} sourceUrl="/node-canvas-prototype/assets/welcome-audio.mp3" onCancel={vi.fn()} />
       </CanvasActionContext.Provider>,
     )
 
-    expect(screen.getByLabelText('裁剪试听音频')).toHaveAttribute('src', '/node-canvas-prototype/assets/node-canvas-welcome.mp3')
+    expect(screen.getByLabelText('裁剪试听音频')).toHaveAttribute('src', '/node-canvas-prototype/assets/welcome-audio.mp3')
   })
 
   it('removes reference-audio and voice-library additions for MiniMax Speech', () => {

@@ -69,6 +69,7 @@ import {
   ZoomIn,
 } from 'lucide-react'
 import { useCanvasActions, type CanvasInteractionMode } from './canvasContext'
+import { canFavoriteMediaNode } from './assetEligibility'
 import { AnchoredPopover } from './floating'
 import { ImageEditorCompositionPreview } from './imageEditor'
 import { ShinyText } from './ShinyText'
@@ -1788,6 +1789,7 @@ export const ImageNode = memo(function ImageNode({ id, data, selected }: NodePro
       sourceKind: 'upload',
       mediaVariant: undefined,
       media: { url, mimeType: file.type || undefined },
+      favorite: undefined,
     })
     const probe = new Image()
     probe.onload = () => updateNode(id, { media: { url, mimeType: file.type || undefined, width: probe.naturalWidth, height: probe.naturalHeight } })
@@ -1836,7 +1838,7 @@ export const ImageNode = memo(function ImageNode({ id, data, selected }: NodePro
               : hasContent
             ? <div className="image-preview" role="img" aria-label={data.content ?? data.title}><ImageVisual data={data} />{data.imageOperation?.operation === 'repaint' && <span className="repaint-result-mark" aria-label="重绘区域" />}</div>
             : <div className="empty-media-node"><ImageIcon size={25} />{pendingUpscale ? <strong>图片高清</strong> : <strong className="sr-only">图片</strong>}</div>}
-        {hasContent && !isGenerating && <button type="button" className={`image-favorite ${data.favorite ? 'active' : ''} nodrag`} onClick={() => { updateNode(id, { favorite: !data.favorite }); notify(data.favorite ? '已取消收藏' : '已收藏到资产') }} aria-label={data.favorite ? '取消收藏图片' : '收藏图片'} title={data.favorite ? '取消收藏' : '收藏'}><Star size={16} fill={data.favorite ? 'currentColor' : 'none'} /></button>}
+        {hasContent && !isGenerating && canFavoriteMediaNode(data) && <button type="button" className={`image-favorite ${data.favorite ? 'active' : ''} nodrag`} onClick={() => { updateNode(id, { favorite: !data.favorite }); notify(data.favorite ? '已取消收藏' : '已收藏到资产') }} aria-label={data.favorite ? '取消收藏图片' : '收藏图片'} title={data.favorite ? '取消收藏' : '收藏'}><Star size={16} fill={data.favorite ? 'currentColor' : 'none'} /></button>}
         {hasContent && !isGenerating && data.starterReplaceable && <><button type="button" className="image-replace-action nodrag" onClick={(event) => { event.stopPropagation(); replaceInputRef.current?.click() }} aria-label={`替换${data.title}`}><Upload size={13} />替换</button><input ref={replaceInputRef} className="sr-only nodrag" type="file" accept="image/*" aria-label={`选择替换${data.title}`} onChange={(event) => { const file = event.target.files?.[0]; if (file) replaceStarterImage(file); event.currentTarget.value = '' }} /></>}
         {sourceMarkers.map((marker) => <button type="button" key={marker.id} className={`image-focus-hotspot ${hoveredPromptMarkerId === marker.id ? 'active' : ''}`} style={{ left: `${marker.x * 100}%`, top: `${marker.y * 100}%` }} onMouseEnter={() => hoverPromptMarker(marker.id)} onMouseLeave={() => hoverPromptMarker(null)} aria-label={marker.label} title={marker.label}>{marker.label}</button>)}
       </div>
@@ -2381,7 +2383,7 @@ export const VideoNode = memo(function VideoNode({ id, data, selected }: NodePro
         {hasContent && !isGenerating && <VideoPlayer label={`${data.title}视频播放器`} media={data.media} compact />}
         {data.status === 'failed' && <MediaErrorState error={data.error} onRetry={() => retryGeneration(id)} />}
         {isGenerating && <>{hasContent && <VideoPlayer label={`${data.title}生成预览`} media={data.media} compact />}<MediaGenerationProgress progress={data.progress} /></>}
-        {hasContent && !isGenerating && <button type="button" className={`video-favorite ${data.favorite ? 'active' : ''} nodrag`} onClick={() => { updateNode(id, { favorite: !data.favorite }); notify(data.favorite ? '已取消收藏' : '已收藏到资产') }} aria-label={data.favorite ? '取消收藏视频' : '收藏视频'} title={data.favorite ? '取消收藏' : '收藏'}><Star size={16} fill={data.favorite ? 'currentColor' : 'none'} /></button>}
+        {hasContent && !isGenerating && canFavoriteMediaNode(data) && <button type="button" className={`video-favorite ${data.favorite ? 'active' : ''} nodrag`} onClick={() => { updateNode(id, { favorite: !data.favorite }); notify(data.favorite ? '已取消收藏' : '已收藏到资产') }} aria-label={data.favorite ? '取消收藏视频' : '收藏视频'} title={data.favorite ? '取消收藏' : '收藏'}><Star size={16} fill={data.favorite ? 'currentColor' : 'none'} /></button>}
       </div>
     {focused && pendingOperation && pendingOperation.operation !== 'edit' && <VideoOperationConfig id={id} data={data} />}
     {focused && pendingOperation?.operation === 'edit' && <VideoEditPanel id={id} data={data} />}

@@ -59,6 +59,7 @@ import {
   X,
 } from 'lucide-react'
 import { calculateAlignmentSnap, type AlignmentBox } from './alignment'
+import { shouldSyncNodeToAssets } from './assetEligibility'
 import { buildStarterExample, starterExamples, type StarterExampleId } from './canvasExamples'
 import { cloneCanvasSnapshot, restoreCanvasSnapshot, type CanvasSnapshot } from './canvasHistory'
 import { CanvasActionContext, type CanvasInteractionMode } from './canvasContext'
@@ -383,7 +384,7 @@ function buildCanvasNode(
         ? imageMediaForVariant(source === 'virtual-ip' ? 'ip' : 'dog')
         : undefined,
     videoGeneration: type === 'video' ? defaultVideoGenerationParams() : undefined,
-    favorite: type === 'image' || type === 'video' ? false : undefined,
+    favorite: (type === 'image' || type === 'video') && source !== 'upload' ? false : undefined,
     backgroundColor: type === 'text' ? 'default' : undefined,
     textFormat: type === 'text' ? { block: 'body', bold: false, italic: false } : undefined,
   }
@@ -428,6 +429,7 @@ function buildImageEditorNode(
       modelId: undefined,
       imageGeneration: undefined,
       cost: undefined,
+      favorite: undefined,
       imageOperation: { operation: 'image-editor', aspectRatio: 'custom' },
       references: [],
     },
@@ -1190,12 +1192,21 @@ function CanvasPrototype() {
 
   useEffect(() => {
     const completedNodeIds = new Set(tasks.filter((task) => task.status === 'success').map((task) => task.nodeId))
-    const generatedNodes = nodes.filter((node) => completedNodeIds.has(node.id))
-    if (!generatedNodes.length) return
+    const generatedNodes = nodes.filter((node) => completedNodeIds.has(node.id) && shouldSyncNodeToAssets(node.data))
+    const excludedNodeIds = new Set(nodes
+      .filter((node) => completedNodeIds.has(node.id) && !shouldSyncNodeToAssets(node.data))
+      .map((node) => node.id))
+    if (!generatedNodes.length && !excludedNodeIds.size) return
 
     setSessionAssets((current) => {
       let changed = false
-      const next = [...current]
+      const next = current.filter((asset) => {
+        const shouldRemove = asset.sourceCanvasId === activeCanvasId
+          && asset.sourceNodeId !== undefined
+          && excludedNodeIds.has(asset.sourceNodeId)
+        if (shouldRemove) changed = true
+        return !shouldRemove
+      })
       generatedNodes.forEach((node) => {
         const existingIndex = next.findIndex((asset) => asset.sourceCanvasId === activeCanvasId && asset.sourceNodeId === node.id)
         const existing = existingIndex >= 0 ? next[existingIndex] : undefined
@@ -1285,7 +1296,7 @@ function CanvasPrototype() {
         .filter((task) => task.nodeType === 'image' && task.status === 'success')
         .flatMap((task) => task.outputNodeIds ?? [task.nodeId]))
       canvas.nodes.forEach((node) => {
-        if (node.data.nodeType !== 'image' || node.data.status !== 'success') return
+        if (node.data.nodeType !== 'image' || node.data.status !== 'success' || !shouldSyncNodeToAssets(node.data)) return
         const composition = node.data.imageOperation?.editorComposition
         const fallbackMedia = (node.data.content ?? '').trim() ? imageMediaForVariant(node.data.mediaVariant) : undefined
         const media = node.data.media ?? fallbackMedia
@@ -2835,6 +2846,7 @@ function CanvasPrototype() {
         content: file.name,
         mediaVariant: undefined,
         media: { url, mimeType: file.type || undefined, hasAudio: type === 'audio' ? true : undefined },
+        favorite: undefined,
         videoOperation: undefined,
       }
       return { file, type, node, url }
@@ -2935,6 +2947,7 @@ function CanvasPrototype() {
           content: file.name,
           mediaVariant: node.data.nodeType === 'audio' ? 'audio' : undefined,
           media,
+          favorite: undefined,
           error: undefined,
           staleNoticeDismissed: undefined,
         },
@@ -3527,7 +3540,7 @@ function CanvasPrototype() {
         imageGeneration: undefined,
         cost: undefined,
         createdAt: isUpdating ? existingOutput.data.createdAt ?? formatNodeCreatedAt() : formatNodeCreatedAt(),
-        favorite: existingOutput.data.favorite ?? false,
+        favorite: undefined,
         starterReplaceable: false,
         imageOperation,
         references: [],

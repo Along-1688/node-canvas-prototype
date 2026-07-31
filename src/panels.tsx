@@ -27,6 +27,7 @@ import {
   Ungroup,
 } from 'lucide-react'
 import { allowedContextSourcesForTarget, allowedTargetsForSource, labelForType } from './domain'
+import { canFavoriteMediaNode } from './assetEligibility'
 import { AnchoredPopover } from './floating'
 import { MediaTypeIcon, mediaNodeTypes, mediaTypeLabels } from './mediaTypes'
 import type { AssetFolder, CanvasFlowNode, CanvasGroup, CanvasPlaylist, DrawerKey, GenerationTask, MediaNodeType, SessionAsset } from './types'
@@ -370,7 +371,7 @@ function AssetsDrawer({ onAddNode, onAddSessionAsset, nodes, onToggleNodeFavorit
   const [creatingFolder, setCreatingFolder] = useState(false)
 
   const canvasFavorites = nodes
-    .filter((node) => (node.data.nodeType === 'image' || node.data.nodeType === 'video') && node.data.favorite)
+    .filter((node) => canFavoriteMediaNode(node.data) && node.data.favorite)
     .map((node): AssetEntry => {
       const isVideo = node.data.nodeType === 'video'
       return {

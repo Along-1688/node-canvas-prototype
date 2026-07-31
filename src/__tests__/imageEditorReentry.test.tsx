@@ -83,6 +83,7 @@ describe('saved image editor node', () => {
     expect(within(toolbar).queryByRole('button', { name: '继续编辑' })).not.toBeInTheDocument()
     expect(within(toolbar).queryByRole('button', { name: '裁剪' })).not.toBeInTheDocument()
     expect(within(toolbar).queryByRole('button', { name: 'Pin 标记' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '收藏图片' })).not.toBeInTheDocument()
 
     fireEvent.click(screen.getByRole('img', { name: '图片编辑结果' }))
 

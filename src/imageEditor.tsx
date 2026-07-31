@@ -18,6 +18,8 @@ export * from './imageEditorModel'
 export interface ImageEditorWorkspaceProps {
   source?: ImageEditorAsset
   assets: ImageEditorAsset[]
+  /** Images linked to the editor node when this is a new, unsaved project. */
+  initialAssets?: ImageEditorAsset[]
   historyAssets?: ImageEditorAsset[]
   initialComposition?: ImageEditorComposition
   onClose: () => void

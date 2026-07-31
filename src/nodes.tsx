@@ -16,6 +16,7 @@ import {
   ChevronRight,
   ChevronUp,
   Clock3,
+  Copy,
   Crop,
   Download,
   Eraser,
@@ -334,8 +335,8 @@ function IconAction({ label, active = false, children, onClick, className = '', 
   return <button ref={buttonRef} type="button" className={`node-icon-action ui-tooltip-control nodrag ${active ? 'active' : ''} ${className}`} data-tooltip={label} aria-label={label} onClick={(event) => { event.stopPropagation(); onClick?.() }}>{children}</button>
 }
 
-function MediaDownloadAction({ label, filename, href, children }: { label: string; filename: string; href: string; children: ReactNode }) {
-  return <a className="node-icon-action ui-tooltip-control nodrag" data-tooltip={label} aria-label={label} href={href} download={filename} onClick={(event) => event.stopPropagation()}>{children}</a>
+function MediaDownloadAction({ label, filename, href, children, className = '' }: { label: string; filename: string; href: string; children: ReactNode; className?: string }) {
+  return <a className={`node-icon-action ui-tooltip-control nodrag ${className}`} data-tooltip={label} aria-label={label} href={href} download={filename} onClick={(event) => event.stopPropagation()}>{children}</a>
 }
 
 function PinControl({ id, value }: { id: string; value?: PinColor }) {
@@ -619,6 +620,97 @@ function VideoPlayer({ label, media, className = '', compact = false, seekTime }
   )
 }
 
+function previewPrompt(data: CanvasNodeData) {
+  if (data.sourceKind !== 'generated' || data.imageOperation || data.videoOperation || data.playlistComposition) return null
+  return data.localPrompt?.trim() || data.promptHistory?.find((item) => item.trim()) || null
+}
+
+function previewSourceLabel(data: CanvasNodeData) {
+  if (data.imageOperation) return `图片工具 · ${operationCopy[data.imageOperation.operation]}`
+  if (data.videoOperation) {
+    const labels: Record<VideoOperation, string> = {
+      'super-resolution': '视频超分',
+      'frame-interpolation': '视频补帧',
+      'subtitle-removal': '字幕擦除',
+      'lip-sync': '对口型',
+      edit: '视频编辑',
+    }
+    return `视频工具 · ${labels[data.videoOperation.operation]}`
+  }
+  if (data.playlistComposition) return '播放列表导出'
+  return {
+    generated: '模型生成',
+    upload: '本地上传',
+    asset: '从资产添加',
+    'virtual-ip': '虚拟 IP',
+    created: '画布新建',
+  }[data.sourceKind]
+}
+
+function previewModelLabel(data: CanvasNodeData) {
+  if (data.nodeType === 'image') return data.modelId === 'seedream-3' ? 'Seedream 3.0' : data.modelId
+  if (data.nodeType === 'video') return videoModelCapabilities.find((item) => item.id === data.modelId)?.label ?? data.modelId
+  return undefined
+}
+
+function previewAspectRatio(data: CanvasNodeData) {
+  const configuredRatio = data.nodeType === 'image' ? data.imageGeneration?.ratio : data.videoGeneration?.ratio
+  if (configuredRatio && configuredRatio !== 'auto') return configuredRatio
+  const { width, height } = data.media ?? {}
+  if (!width || !height) return undefined
+  const knownRatios: Array<[number, string]> = [
+    [1, '1:1'], [16 / 9, '16:9'], [9 / 16, '9:16'], [3 / 4, '3:4'], [4 / 3, '4:3'], [3 / 2, '3:2'], [2 / 3, '2:3'], [21 / 9, '21:9'],
+  ]
+  const ratio = width / height
+  return knownRatios.find(([value]) => Math.abs(value - ratio) < .025)?.[1] ?? `${width}:${height}`
+}
+
+function previewMediaFormat(data: CanvasNodeData) {
+  const mimeType = data.media?.mimeType
+  if (!mimeType) return undefined
+  const subtype = mimeType.split('/')[1]
+  return subtype ? subtype.toUpperCase() : mimeType.toUpperCase()
+}
+
+function PreviewMetadata({ data, onClose }: { data: CanvasNodeData; onClose: () => void }) {
+  const prompt = previewPrompt(data)
+  const resolution = formatMediaResolution(data.media?.width, data.media?.height)
+  const model = previewModelLabel(data)
+  const aspectRatio = previewAspectRatio(data)
+  const format = previewMediaFormat(data)
+  const metadata = [
+    { label: '来源', value: previewSourceLabel(data) },
+    ...(model ? [{ label: '模型', value: model }] : []),
+    ...(resolution ? [{ label: '分辨率', value: resolution }] : []),
+    ...(aspectRatio ? [{ label: '宽高比', value: aspectRatio }] : []),
+    ...(data.nodeType === 'video' && data.duration !== undefined ? [{ label: '时长', value: formatVideoTime(data.duration) }] : []),
+    ...(data.nodeType === 'video' && data.media?.hasAudio !== undefined ? [{ label: '音频', value: data.media.hasAudio ? '有' : '无' }] : []),
+    ...(format ? [{ label: '格式', value: format }] : []),
+  ]
+  const imageDownload = data.nodeType === 'image' ? imageDownloadSource(data) : undefined
+  const downloadLabel = data.nodeType === 'image' ? '下载图片' : '下载视频'
+  const downloadHref = imageDownload?.href ?? data.media?.url ?? '/node-canvas-prototype/assets/virtual-ip-host-video.mp4'
+  const downloadExtension = imageDownload?.extension ?? mediaFileExtension(data.media, 'video')
+
+  return <aside className="preview-metadata-panel" aria-label={`${data.title}素材信息`}>
+    <header>
+      <span><strong>{data.title}</strong><small>{data.nodeType === 'image' ? '图片预览' : '视频预览'}</small></span>
+      <button type="button" autoFocus onClick={onClose} aria-label="关闭全屏预览"><X size={19} /></button>
+    </header>
+    <section className="preview-metadata-section" aria-labelledby="preview-prompt-title">
+      <h2 id="preview-prompt-title">提示词</h2>
+      <p className={prompt ? '' : 'is-empty'}>{prompt ?? '暂无提示词'}</p>
+    </section>
+    <section className="preview-metadata-section" aria-labelledby="preview-information-title">
+      <h2 id="preview-information-title">信息</h2>
+      <dl>{metadata.map((item) => <div key={item.label}><dt>{item.label}</dt><dd>{item.value}</dd></div>)}</dl>
+    </section>
+    <footer>
+      <MediaDownloadAction className="preview-download-action" label={downloadLabel} filename={`${data.title}.${downloadExtension}`} href={downloadHref}><Download size={15} /><span>{downloadLabel}</span></MediaDownloadAction>
+    </footer>
+  </aside>
+}
+
 export function PreviewOverlay({ open, onClose, id, data }: { open: boolean; onClose: () => void; id: string; data: CanvasNodeData }) {
   const { updateNode } = useCanvasActions()
   const format = data.textFormat ?? { block: 'body', bold: false, italic: false }
@@ -630,17 +722,23 @@ export function PreviewOverlay({ open, onClose, id, data }: { open: boolean; onC
   }, [onClose, open])
 
   if (!open) return null
+  const isMediaPreview = data.nodeType === 'image' || data.nodeType === 'video'
   return createPortal(
     <div className="node-preview-overlay" data-isolate-canvas-shortcuts="true" role="dialog" aria-modal="true" aria-label={`${data.title}${data.nodeType === 'text' ? '全屏编辑' : '全屏预览'}`} onMouseDown={onClose}>
       <section className={`node-preview-panel preview-${data.nodeType} ${data.nodeType === 'text' ? 'fullscreen-text-editor' : ''}`} onMouseDown={(event) => event.stopPropagation()}>
-        {data.nodeType !== 'text' && <header><strong>{data.title}</strong><button type="button" autoFocus onClick={onClose} aria-label="关闭全屏预览"><X size={19} /></button></header>}
+        {!isMediaPreview && data.nodeType !== 'text' && <header><strong>{data.title}</strong><button type="button" autoFocus onClick={onClose} aria-label="关闭全屏预览"><X size={19} /></button></header>}
         {data.nodeType === 'text' ? (
           <><TextToolbar id={id} data={data} variant="fullscreen" onClose={onClose} /><textarea className={`fullscreen-text text-bg-${data.backgroundColor ?? 'default'} text-block-${format.block} ${format.bold ? 'is-bold' : ''} ${format.italic ? 'is-italic' : ''}`} aria-label="全屏编辑文本" value={data.content ?? ''} placeholder="输入文本内容" onChange={(event) => updateNode(id, { content: event.target.value, status: event.target.value.trim() ? 'ready' : 'idle' })} /></>
         ) : data.nodeType === 'audio' ? (
           <div className="fullscreen-audio"><Waves size={46} /><strong>{data.content}</strong><span>音频预览</span></div>
-        ) : data.nodeType === 'video' ? (
-          <VideoPlayer label={`${data.title}全屏播放器`} media={data.media} className="fullscreen-video-player" />
-        ) : <img src={assetUrl(data)} alt={data.content || data.title} />}
+        ) : <>
+          <main className="preview-media-stage">
+            {data.nodeType === 'video'
+              ? <VideoPlayer label={`${data.title}全屏播放器`} media={data.media} className="fullscreen-video-player" />
+              : <img src={assetUrl(data)} alt={data.content || data.title} />}
+          </main>
+          <PreviewMetadata data={data} onClose={onClose} />
+        </>}
       </section>
     </div>,
     document.body,
@@ -676,7 +774,26 @@ function TextToolbar({ id, data, onExpand, onClose, variant = 'node' }: { id: st
       <div className="list-control"><IconAction label="项目符号列表" onClick={() => applyList(false)}><List size={15} /></IconAction><button ref={listButtonRef} type="button" className="list-chevron nodrag" aria-label="选择列表类型" title="选择列表类型" onClick={() => setListOpen((current) => !current)}><ChevronDown size={12} /></button><AnchoredPopover anchorRef={listButtonRef} open={listOpen} onClose={() => setListOpen(false)} className="toolbar-menu list-format-menu" align="start"><div role="menu"><button type="button" onClick={() => { applyList(false); setListOpen(false) }}><List size={14} />项目符号</button><button type="button" onClick={() => { applyList(true); setListOpen(false) }}><span className="numbered-list-icon">1.</span>编号列表</button><button type="button" onClick={() => { clearList(); setListOpen(false) }}><X size={14} />清除列表格式</button></div></AnchoredPopover></div>
       <span className="toolbar-divider" />
       <PinControl id={id} value={data.pinColor} />
-      <IconAction label="下载文本" onClick={() => { startDownload(`${data.title}.txt`, '', data.content ?? ''); notify('已下载文本') }}><Download size={15} /></IconAction>
+      <IconAction label="复制文本" onClick={async () => {
+        const text = data.content ?? ''
+        try {
+          if (navigator.clipboard?.writeText) {
+            await navigator.clipboard.writeText(text)
+          } else {
+            const input = document.createElement('textarea')
+            input.value = text
+            input.style.position = 'fixed'
+            input.style.opacity = '0'
+            document.body.append(input)
+            input.select()
+            document.execCommand('copy')
+            input.remove()
+          }
+          notify('已复制文本')
+        } catch {
+          notify('复制失败，请检查浏览器权限')
+        }
+      }}><Copy size={15} /></IconAction>
       {onExpand && <IconAction label="全屏编辑" onClick={onExpand}><Expand size={15} /></IconAction>}
       {variant === 'fullscreen' && onClose && <button type="button" className="node-icon-action fullscreen-text-close" autoFocus onClick={onClose} aria-label="关闭全屏编辑" title="关闭"><X size={15} /></button>}
     </div>
@@ -1263,6 +1380,18 @@ function ImageToolbar({ id, data, activeTool, onTool, onExpand }: { id: string; 
     { id: 'expand', label: '智能扩图', icon: <Maximize2 size={14} /> },
     { id: 'upscale', label: '图片高清', icon: <Sparkles size={14} /> },
   ]
+  const canContinueEditing = (data.imageOperation?.operation === 'image-editor' || data.imageOperation?.operation === 'image-compose')
+    && Boolean(data.imageOperation.editorComposition)
+
+  if (canContinueEditing) {
+    const download = imageDownloadSource(data)
+    return (
+      <div className="image-toolbar media-toolbar image-editor-result-toolbar zoom-stable-ui nodrag" role="toolbar" aria-label="图片编辑器工具">
+        <IconAction label="下载图片" onClick={() => { startDownload(`${data.title}.${download.extension}`, download.href); notify('已开始下载') }}><Download size={15} /></IconAction>
+        <IconAction label="全屏预览" onClick={onExpand}><Expand size={15} /></IconAction>
+      </div>
+    )
+  }
 
   const createGridResult = (columns: number, rows: number) => {
     createImageDerivative(id, 'grid-split', { operation: 'grid-split', grid: Math.max(columns, rows), gridColumns: columns, gridRows: rows })
@@ -1610,7 +1739,7 @@ function MediaGenerationProgress({ progress }: { progress?: number }) {
 }
 
 export const ImageNode = memo(function ImageNode({ id, data, selected }: NodeProps<CanvasFlowNode>) {
-  const { updateNode, notify, retryGeneration, interactionMode, isInteractionCandidate, addPromptMarker, markersForSource, hoveredPromptMarkerId, hoverPromptMarker, selectedItemCount, isConnectionTargetCandidate, uploadNodeMedia } = useCanvasActions()
+  const { updateNode, notify, retryGeneration, interactionMode, isInteractionCandidate, addPromptMarker, markersForSource, hoveredPromptMarkerId, hoverPromptMarker, selectedItemCount, isConnectionTargetCandidate, uploadNodeMedia, openImageEditor } = useCanvasActions()
   const [previewOpen, setPreviewOpen] = useState(false)
   const [activeTool, setActiveTool] = useState<Exclude<ImageOperation, 'prompt-regenerate'> | null>(null)
   const replaceInputRef = useRef<HTMLInputElement>(null)
@@ -1620,12 +1749,15 @@ export const ImageNode = memo(function ImageNode({ id, data, selected }: NodePro
   const pendingUpscale = data.status === 'ready' && data.imageOperation?.operation === 'upscale'
   const isGenerating = data.status === 'queued' || data.status === 'running'
   const hasContent = !pendingUpscale && Boolean((data.content ?? '').trim() || data.media?.url || data.imageOperation?.editorComposition?.renderedDataUrl)
+  const isInitialImageEditor = data.imageOperation?.operation === 'image-editor' && !hasContent
+  const canContinueEditing = (data.imageOperation?.operation === 'image-editor' || data.imageOperation?.operation === 'image-compose')
+    && Boolean(data.imageOperation.editorComposition)
   const focused = selected && selectedItemCount === 1
   const candidate = isConnectionTargetCandidate(id)
   const interactionClass = interactionNodeClass(id, interactionMode, isInteractionCandidate(id))
   const pendingImageEditor = data.status === 'ready' && (data.imageOperation?.operation === 'rotate' || data.imageOperation?.operation === 'edit-text')
   const quarterTurn = data.imageOperation?.operation === 'rotate' && isQuarterTurn(data.imageOperation.angle)
-  const showPrompt = focused && shouldShowImageGenerationPrompt(data) && !activeTool
+  const showPrompt = focused && !isInitialImageEditor && shouldShowImageGenerationPrompt(data) && !activeTool
   const sourceMarkers = markersForSource(id)
   const visualRatio = imageSurfaceRatio(data)
   const overlaySelector = !focused
@@ -1659,6 +1791,21 @@ export const ImageNode = memo(function ImageNode({ id, data, selected }: NodePro
   useEffect(() => { if (!focused) setActiveTool(null) }, [focused])
   useKeepNodeOverlayInViewport(nodeRef, overlaySelector)
 
+  if (isInitialImageEditor) {
+    return (
+      <article ref={nodeRef} className={`canvas-node image-node image-editor-node ${selected ? 'is-selected' : ''} ${candidate ? 'is-connection-candidate' : ''} ${interactionClass}`} style={overlayVariables}>
+        <ConnectionHandles nodeId={id} source={false} />
+        <NodeHeader id={id} data={data} icon={<ImageIcon size={13} />} />
+        <div className="node-surface image-surface image-editor-node-surface">
+          <div className="image-editor-node-empty">
+            <span className="image-editor-node-icon"><ImageIcon size={29} /><Brush size={15} /></span>
+            <button type="button" className="image-editor-open-button nodrag" onClick={() => openImageEditor(id)}>打开编辑器</button>
+          </div>
+        </div>
+      </article>
+    )
+  }
+
   return (
     <article ref={nodeRef} className={`canvas-node image-node ${selected ? 'is-selected' : ''} ${candidate ? 'is-connection-candidate' : ''} ${hasContent || isGenerating || data.status === 'failed' ? '' : 'is-empty'} ${data.status === 'failed' ? 'has-error' : ''} ${quarterTurn ? 'is-quarter-turn' : ''} ${data.imageGeneration?.stylePreset ? `mock-style-${data.imageGeneration.stylePreset}` : ''} ${interactionClass}`} style={overlayVariables}>
       <ConnectionHandles nodeId={id} />
@@ -1666,10 +1813,15 @@ export const ImageNode = memo(function ImageNode({ id, data, selected }: NodePro
       <NodeHeader id={id} data={data} icon={<ImageIcon size={13} />} />
       {focused && !hasContent && !isGenerating && data.status !== 'failed' && !pendingUpscale && <><button type="button" className="empty-node-upload nodrag" onClick={() => uploadInputRef.current?.click()}><Upload size={14} />上传</button><input ref={uploadInputRef} className="sr-only" type="file" accept="image/*" aria-label="上传图片到当前节点" onChange={(event) => { const file = event.target.files?.[0]; if (file) uploadNodeMedia(id, file); event.currentTarget.value = '' }} /></>}
       <div className="node-surface image-surface" style={{ aspectRatio: visualRatio }} onClick={(event) => {
-        if (interactionMode?.kind !== 'marker' || !isInteractionCandidate(id)) return
+        if (interactionMode?.kind === 'marker' && isInteractionCandidate(id)) {
+          event.stopPropagation()
+          const rect = event.currentTarget.getBoundingClientRect()
+          addPromptMarker(interactionMode.targetNodeId, id, Math.min(Math.max((event.clientX - rect.left) / rect.width, 0), 1), Math.min(Math.max((event.clientY - rect.top) / rect.height, 0), 1))
+          return
+        }
+        if (!canContinueEditing || !focused || (event.target as HTMLElement).closest('button')) return
         event.stopPropagation()
-        const rect = event.currentTarget.getBoundingClientRect()
-        addPromptMarker(interactionMode.targetNodeId, id, Math.min(Math.max((event.clientX - rect.left) / rect.width, 0), 1), Math.min(Math.max((event.clientY - rect.top) / rect.height, 0), 1))
+        openImageEditor(id)
       }}>
         {data.status === 'failed'
           ? <MediaErrorState error={data.error} onRetry={() => retryGeneration(id)} />

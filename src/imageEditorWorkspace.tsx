@@ -98,6 +98,8 @@ import type { Layer as PsdLayer, Psd } from 'ag-psd'
 export interface ImageEditorWorkspaceProps {
   source?: ImageEditorAsset
   assets: ImageEditorAsset[]
+  /** Upstream images are placed on a new project once, before the user edits it. */
+  initialAssets?: ImageEditorAsset[]
   historyAssets?: ImageEditorAsset[]
   initialComposition?: ImageEditorComposition
   onClose: () => void
@@ -1135,6 +1137,7 @@ function LayerThumbnail({ layer }: { layer: LayerDescriptor }) {
 export function ImageEditorWorkspace({
   source,
   assets,
+  initialAssets = [],
   historyAssets = [],
   initialComposition,
   onClose,
@@ -1157,7 +1160,7 @@ export function ImageEditorWorkspace({
   const layerListRef = useRef<HTMLDivElement>(null)
   const closeDialogRef = useRef<HTMLDivElement>(null)
   const poseDialogRef = useRef<HTMLDivElement>(null)
-  const initialPropsRef = useRef({ source, initialComposition })
+  const initialPropsRef = useRef({ source, initialAssets, initialComposition })
   const widthRef = useRef(initialSize.width)
   const heightRef = useRef(initialSize.height)
   const aspectRatioRef = useRef<ImageEditorAspectRatio>(initialComposition?.aspectRatio || 'custom')
@@ -2292,6 +2295,22 @@ export function ImageEditorWorkspace({
           if (object.sourceNodeId) lineageRef.current.add(object.sourceNodeId)
           canvas.add(object)
         })
+      } else if (initial.initialAssets.length) {
+        const total = initial.initialAssets.length
+        const columns = total === 1 ? 1 : total === 2 ? 1 : Math.ceil(Math.sqrt(total))
+        const rows = Math.ceil(total / columns)
+        const sizeFraction = total === 1 ? 1 : Math.min(0.82 / columns, 0.82 / rows)
+        for (const [index, asset] of initial.initialAssets.entries()) {
+          const column = index % columns
+          const row = Math.floor(index / columns)
+          await addImage(asset, {
+            record: false,
+            widthFraction: sizeFraction,
+            left: widthRef.current * (column + 0.5) / columns,
+            top: heightRef.current * (row + 0.5) / rows,
+          })
+          if (cancelled || canvasRef.current !== canvas) return
+        }
       } else if (initial.source) {
         await addImage(initial.source, { record: false })
       }

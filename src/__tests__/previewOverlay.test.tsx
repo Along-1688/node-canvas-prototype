@@ -36,19 +36,45 @@ describe('node fullscreen preview', () => {
   it.each([
     ['image', '图片全屏预览', 'preview-image'],
     ['video', '视频全屏预览', 'preview-video'],
-  ] as const)('gives the %s preview its dedicated near-viewport panel', (nodeType, dialogName, panelClass) => {
+  ] as const)('gives the %s preview its dedicated near-viewport panel with metadata', (nodeType, dialogName, panelClass) => {
     renderPreview({
       nodeType,
       title: nodeType === 'image' ? '图片' : '视频',
       content: `${nodeType} preview`,
       status: 'ready',
       sourceKind: 'generated',
+      localPrompt: '保留主体构图，画面清晰自然。',
+      modelId: nodeType === 'image' ? 'seedream-3' : 'kling-o1',
       media: nodeType === 'video' ? { url: '/preview.mp4', width: 1280, height: 720 } : undefined,
     })
 
     const dialog = screen.getByRole('dialog', { name: dialogName })
     expect(dialog.querySelector('section')).toHaveClass('node-preview-panel', panelClass)
     expect(within(dialog).getByRole('button', { name: '关闭全屏预览' })).toBeInTheDocument()
+    expect(within(dialog).getByRole('complementary', { name: `${nodeType === 'image' ? '图片' : '视频'}素材信息` })).toBeInTheDocument()
+    expect(within(dialog).getByText('提示词')).toBeInTheDocument()
+    expect(within(dialog).getByText('保留主体构图，画面清晰自然。')).toBeInTheDocument()
+    expect(within(dialog).getByText('信息')).toBeInTheDocument()
+    expect(within(dialog).getByRole('link', { name: `下载${nodeType === 'image' ? '图片' : '视频'}` })).toHaveAttribute('download')
+  })
+
+  it.each([
+    ['upload', undefined],
+    ['generated', { operation: 'relight', brightness: 18, temperature: 24, lightPosition: '右上', secondaryLight: true }],
+  ] as const)('shows no prompt for %s images and tool results', (sourceKind, imageOperation) => {
+    renderPreview({
+      nodeType: 'image',
+      title: '素材图片',
+      content: '素材图片',
+      status: 'success',
+      sourceKind,
+      localPrompt: '即使存在历史输入也不应作为素材提示词展示。',
+      imageOperation,
+      media: { url: '/preview.png', mimeType: 'image/png', width: 1280, height: 720 },
+    })
+
+    const dialog = screen.getByRole('dialog', { name: '素材图片全屏预览' })
+    expect(within(dialog).getByText('暂无提示词')).toBeInTheDocument()
   })
 
   it('closes the active preview with Escape', () => {

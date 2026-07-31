@@ -76,7 +76,7 @@ function DrawerShell({ active, onClose, children }: { active: Exclude<DrawerKey,
 }
 
 const addNodeDescriptions: Record<MediaNodeType, string> = {
-  text: '脚本、广告词与品牌文案',
+  text: '脚本、广告词、品牌文案',
   image: '生成图片或继续编辑画面',
   video: '从文字、首帧或参考生成',
   audio: '生成配音、音效与背景音乐',
@@ -88,21 +88,29 @@ interface AddMenuContentProps {
   onAuxiliaryTool: DrawerProps['onAuxiliaryTool']
 }
 
+function AddNodeList({ onAddNode, itemRole }: Pick<AddMenuContentProps, 'onAddNode'> & { itemRole?: 'menuitem' }) {
+  return <div className="add-list">{mediaNodeTypes.map((type) => (
+    <button type="button" key={type} role={itemRole} onClick={() => onAddNode(type)}>
+      <span className={`add-icon icon-${type}`}><MediaTypeIcon type={type} /></span><span><strong>{mediaTypeLabels[type]}</strong><small>{addNodeDescriptions[type]}</small></span>
+    </button>
+  ))}</div>
+}
+
+function AuxiliaryToolList({ onAuxiliaryTool, itemRole }: Pick<AddMenuContentProps, 'onAuxiliaryTool'> & { itemRole?: 'menuitem' }) {
+  return <div className="add-list auxiliary-list">
+    <button type="button" role={itemRole} onClick={() => onAuxiliaryTool('播放列表')}><span className="add-icon icon-playlist"><CirclePlay size={17} /></span><span><strong>播放列表</strong><small>时间轴串联多段素材</small></span></button>
+    <button type="button" role={itemRole} onClick={() => onAuxiliaryTool('图片编辑器')}><span className="add-icon icon-image-editor"><ImageIcon size={17} /></span><span><strong>图片编辑器</strong><small>集中处理画布中的图片素材</small></span></button>
+  </div>
+}
+
 function AddMenuContent({ onAddNode, onUploadFiles, onAuxiliaryTool }: AddMenuContentProps) {
   const uploadInputRef = useRef<HTMLInputElement>(null)
   return (
     <div className="add-menu-content">
       <p className="drawer-section-label">添加节点</p>
-      <div className="add-list">{mediaNodeTypes.map((type) => (
-        <button type="button" key={type} onClick={() => onAddNode(type)}>
-          <span className={`add-icon icon-${type}`}><MediaTypeIcon type={type} /></span><span><strong>{mediaTypeLabels[type]}</strong><small>{addNodeDescriptions[type]}</small></span>
-        </button>
-      ))}</div>
+      <AddNodeList onAddNode={onAddNode} />
       <p className="drawer-section-label tools-label">辅助工具</p>
-      <div className="add-list auxiliary-list">
-        <button type="button" onClick={() => onAuxiliaryTool('播放列表')}><span className="add-icon icon-playlist"><CirclePlay size={17} /></span><span><strong>播放列表</strong><small>按顺序组织多个视频片段</small></span></button>
-        <button type="button" onClick={() => onAuxiliaryTool('图片编辑器')}><span className="add-icon icon-image-editor"><ImageIcon size={17} /></span><span><strong>图片编辑器</strong><small>集中处理画布中的图片素材</small></span></button>
-      </div>
+      <AuxiliaryToolList onAuxiliaryTool={onAuxiliaryTool} />
       <p className="drawer-section-label resources-label">添加资源</p>
       <button type="button" className="upload-resource-action" onClick={() => uploadInputRef.current?.click()}><Upload size={18} /><span><strong>上传文件</strong><small>图片、视频或音频</small></span></button>
       <input ref={uploadInputRef} className="sr-only" type="file" accept="image/*,video/*,audio/*" multiple aria-label="选择上传文件" onChange={(event) => { const files = Array.from(event.target.files ?? []); if (files.length) onUploadFiles(files); event.currentTarget.value = '' }} />
@@ -136,6 +144,109 @@ export function QuickAddMenu({ position, onAddNode, onUploadFiles, onAuxiliaryTo
       <AddMenuContent onAddNode={onAddNode} onUploadFiles={onUploadFiles} onAuxiliaryTool={onAuxiliaryTool} />
     </aside>
   )
+}
+
+export function CanvasBlankContextMenu({
+  position,
+  onUploadFiles,
+  onOpenAssets,
+  onAddNode,
+  onAuxiliaryTool,
+  onUndo,
+  onRedo,
+  onPaste,
+  onClose,
+}: {
+  position: { x: number; y: number }
+  onUploadFiles: (files: File[]) => void
+  onOpenAssets: () => void
+  onAddNode: (type: MediaNodeType) => void
+  onAuxiliaryTool: (tool: AuxiliaryTool) => void
+  onUndo: () => void
+  onRedo: () => void
+  onPaste: () => void
+  onClose: () => void
+}) {
+  const [view, setView] = useState<'root' | 'nodes' | 'tools'>('root')
+  const rootRef = useRef<HTMLElement>(null)
+  const uploadInputRef = useRef<HTMLInputElement>(null)
+  const estimatedHeight = view === 'nodes' ? 288 : view === 'tools' ? 178 : 360
+  const menuPosition = {
+    left: Math.min(Math.max(14, position.x), Math.max(14, window.innerWidth - 254)),
+    top: Math.min(Math.max(14, position.y), Math.max(14, window.innerHeight - estimatedHeight)),
+  }
+
+  useEffect(() => {
+    const dismiss = (event: PointerEvent) => {
+      if (!rootRef.current?.contains(event.target as Node)) onClose()
+    }
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') onClose()
+    }
+    document.addEventListener('pointerdown', dismiss, true)
+    window.addEventListener('keydown', closeOnEscape)
+    return () => {
+      document.removeEventListener('pointerdown', dismiss, true)
+      window.removeEventListener('keydown', closeOnEscape)
+    }
+  }, [onClose])
+
+  const invoke = (action: () => void) => {
+    action()
+    onClose()
+  }
+
+  const rootMenu = <>
+    <button type="button" role="menuitem" className="is-primary" onClick={() => uploadInputRef.current?.click()}>上传</button>
+    <button type="button" role="menuitem" onClick={() => invoke(onOpenAssets)}>添加资产</button>
+    <span role="separator" />
+    <button type="button" role="menuitem" onClick={() => setView('nodes')}>添加节点</button>
+    <button type="button" role="menuitem" onClick={() => setView('tools')}>添加辅助工具</button>
+    <span role="separator" />
+    <button type="button" role="menuitem" onClick={() => invoke(onUndo)}>撤销<kbd>⌘Z</kbd></button>
+    <button type="button" role="menuitem" onClick={() => invoke(onRedo)}>重做<kbd>⇧⌘Z</kbd></button>
+    <button type="button" role="menuitem" onClick={() => invoke(onPaste)}>粘贴<kbd>⌘V</kbd></button>
+  </>
+
+  const nodeMenu = <>
+    <div className="add-menu-content canvas-context-add-content">
+      <p className="drawer-section-label">添加节点</p>
+      <AddNodeList itemRole="menuitem" onAddNode={(type) => invoke(() => onAddNode(type))} />
+    </div>
+  </>
+
+  const toolMenu = <>
+    <div className="add-menu-content canvas-context-add-content">
+      <p className="drawer-section-label">辅助工具</p>
+      <AuxiliaryToolList itemRole="menuitem" onAuxiliaryTool={(tool) => invoke(() => onAuxiliaryTool(tool))} />
+    </div>
+  </>
+
+  return <aside
+    ref={rootRef}
+    className={`canvas-blank-context-menu ${view === 'root' ? '' : 'is-submenu'}`}
+    style={menuPosition}
+    role="menu"
+    aria-label={view === 'nodes' ? '添加节点' : view === 'tools' ? '辅助工具' : '画布操作'}
+    data-canvas-overlay="true"
+    onPointerDown={(event) => event.stopPropagation()}
+  >
+    {view === 'root' ? rootMenu : view === 'nodes' ? nodeMenu : toolMenu}
+    <input
+      ref={uploadInputRef}
+      className="sr-only"
+      type="file"
+      accept="image/*,video/*,audio/*"
+      multiple
+      aria-label="选择上传文件"
+      onChange={(event) => {
+        const files = Array.from(event.target.files ?? [])
+        if (files.length) onUploadFiles(files)
+        event.currentTarget.value = ''
+        onClose()
+      }}
+    />
+  </aside>
 }
 
 type ContinuationItem =

@@ -67,7 +67,6 @@ import { allowedContextSourcesForTarget, allowedTargetsForSource, attachCanvasEd
 import { edgeTypes } from './edges'
 import { AnchoredPopover } from './floating'
 import { ImageEditorWorkspace } from './imageEditor'
-import { detachImageEditorResultEdges } from './imageEditorBehavior'
 import { generationDefinitions, initialEdges, initialNodes, initialTasks } from './mockData'
 import {
   buildGridSlices,
@@ -98,7 +97,7 @@ import {
 } from './grouping'
 import { nodeTypes } from './nodes'
 import { ShinyText } from './ShinyText'
-import { ContextMenu, ContinuationMenu, DrawerPanel, QuickAddMenu } from './panels'
+import { CanvasBlankContextMenu, ContextMenu, ContinuationMenu, DrawerPanel, QuickAddMenu } from './panels'
 import { MediaTypeIcon } from './mediaTypes'
 import { cloneMediaMetadata, HOST_VIDEO_MEDIA, imageMediaForVariant } from './mediaMetadata'
 import { batchMediaPosition } from './mediaGeometry'
@@ -186,15 +185,11 @@ import type {
 interface QuickAddState { x: number; y: number; flowPosition: { x: number; y: number } }
 interface ContinuationState extends QuickAddState { sourceNodeId: string }
 interface ContextAddState extends QuickAddState { targetNodeId: string }
-interface ImageEditorStateBase {
+interface ImageEditorState {
   canvasId: string
-  insertionPosition: { x: number; y: number }
-  outputNodeId?: string
+  editorNodeId: string
   openedAt: number
 }
-type ImageEditorState =
-  | (ImageEditorStateBase & { mode: 'standalone'; sourceNodeId?: undefined })
-  | (ImageEditorStateBase & { mode: 'derive'; sourceNodeId: string })
 interface MarqueeState { startX: number; startY: number; currentX: number; currentY: number; additive: boolean; pointerId: number }
 interface SpacePanState { startX: number; startY: number; pointerId: number; viewport: Viewport }
 interface PlaylistDropPreview { playlistId: string; nodeId: string; insertionIndex: number }
@@ -342,6 +337,11 @@ function isBlankCanvasTarget(target: EventTarget | null) {
   return Boolean(target.closest('.react-flow__pane, .react-flow__background, .react-flow__viewport'))
 }
 
+function canOpenCanvasContextMenu(target: EventTarget | null) {
+  if (!(target instanceof Element)) return false
+  return !target.closest('.react-flow__node, .react-flow__edge, .canvas-group-frame, .canvas-playlist, .floating-popover, .quick-add-menu, .continuation-menu, .multi-selection-toolbar, .canvas-interaction-banner, .edge-action, .react-flow__controls, .react-flow__panel, .react-flow__minimap, [data-canvas-overlay="true"]')
+}
+
 function buildCanvasNode(
   id: string,
   type: MediaNodeType,
@@ -392,6 +392,35 @@ function buildCanvasNode(
           ? { width: 260 }
           : { width: 320 },
     } : type === 'text' ? { style: { width: 290, height: 176 } } : {}),
+  }
+}
+
+/**
+ * The editor starts as a dedicated input container. Its linked images stay on
+ * the canvas until the user explicitly opens and saves an editor project.
+ */
+function buildImageEditorNode(
+  id: string,
+  index: number,
+  position: { x: number; y: number },
+): CanvasFlowNode {
+  const base = buildCanvasNode(id, 'image', 'created', index, position)
+  return {
+    ...base,
+    style: { width: 220 },
+    data: {
+      ...base.data,
+      title: '图片编辑器',
+      content: '',
+      sourceKind: 'created',
+      status: 'idle',
+      mediaVariant: undefined,
+      media: undefined,
+      imageGeneration: undefined,
+      cost: undefined,
+      imageOperation: { operation: 'image-editor', aspectRatio: 'custom' },
+      references: [],
+    },
   }
 }
 
@@ -1096,6 +1125,7 @@ function CanvasPrototype() {
   const [shareLink, setShareLink] = useState('')
   const [shareAccess, setShareAccess] = useState<'public' | 'private'>('public')
   const [quickAdd, setQuickAdd] = useState<QuickAddState | null>(null)
+  const [canvasContextMenu, setCanvasContextMenu] = useState<QuickAddState | null>(null)
   const [continuation, setContinuation] = useState<ContinuationState | null>(null)
   const [contextAdd, setContextAdd] = useState<ContextAddState | null>(null)
   const [connectingSourceNodeId, setConnectingSourceNodeId] = useState<string | null>(null)
@@ -1137,12 +1167,6 @@ function CanvasPrototype() {
   const futures = useRef<Record<string, CanvasSnapshot[]>>({ [workspace.activeCanvasId]: [] })
   const nodeDragRef = useRef<NodeDragState | null>(null)
   const playlistDropPreviewRef = useRef<PlaylistDropPreview | null>(null)
-  const imageEditorCommittedNodeRef = useRef<{
-    canvasId: string
-    openedAt: number
-    node: CanvasFlowNode
-    snapshot: CanvasSnapshot
-  } | null>(null)
   const canvasesRef = useRef(canvases)
   const activeCanvasIdRef = useRef(activeCanvasId)
   const toastTimer = useRef<number | null>(null)
@@ -1226,9 +1250,23 @@ function CanvasPrototype() {
         composition,
       }]
     }), [imageEditorCanvasNodes])
-  const imageEditorSource = imageEditor?.sourceNodeId ? imageEditorAssets.find((asset) => asset.sourceNodeId === imageEditor.sourceNodeId) : undefined
+  const imageEditorNode = imageEditor
+    ? imageEditorCanvasNodes.find((node) => node.id === imageEditor.editorNodeId && node.data.nodeType === 'image')
+    : undefined
+  const imageEditorInitialAssets = useMemo<ImageEditorAsset[]>(() => {
+    if (!imageEditor || !imageEditorCanvas) return []
+    const linkedAssets: ImageEditorAsset[] = []
+    imageEditorCanvas.edges
+      .filter((edge) => edge.target === imageEditor.editorNodeId && edge.data?.relationType === 'generation-input')
+      .forEach((edge) => {
+        const asset = imageEditorAssets.find((candidate) => candidate.sourceNodeId === edge.source)
+        if (asset) linkedAssets.push(asset)
+      })
+    return linkedAssets
+  }, [imageEditor, imageEditorAssets, imageEditorCanvas])
+  const imageEditorSource = imageEditorInitialAssets[0]
   const imageEditorInitialComposition = imageEditor
-    ? imageEditorCanvasNodes.find((node) => node.id === (imageEditor.outputNodeId ?? imageEditor.sourceNodeId))?.data.imageOperation?.editorComposition
+    ? imageEditorNode?.data.imageOperation?.editorComposition
     : undefined
   const imageEditorHistoryAssets = useMemo<ImageEditorAsset[]>(() => {
     const deduped = new Map<string, ImageEditorAsset>()
@@ -2748,6 +2786,21 @@ function CanvasPrototype() {
     notify(`${node.data.title}已加入画布`)
   }, [notify, saveHistory, screenToFlowPosition, setEdges, setNodes])
 
+  const pasteTextNode = useCallback(async (position: { x: number; y: number }) => {
+    try {
+      const content = await navigator.clipboard.readText()
+      if (!content.trim()) return notify('剪贴板中没有可粘贴的文本')
+      saveHistory()
+      const node = buildCanvasNode(`text-${Date.now()}`, 'text', 'created', nodeCounter.current++, position)
+      node.data = { ...node.data, content, status: 'ready' }
+      setEdges((current) => current.map((edge) => ({ ...edge, selected: false })))
+      setNodes((current) => [...current.map((item) => ({ ...item, selected: false })), node])
+      notify('已粘贴为文本节点')
+    } catch {
+      notify('无法读取剪贴板，请使用 Cmd/Ctrl + V')
+    }
+  }, [notify, saveHistory, setEdges, setNodes])
+
   const uploadFiles = useCallback((files: File[], positionOverride?: { x: number; y: number }) => {
     const accepted = files.flatMap((file) => {
       const type = mediaNodeTypeForFile(file)
@@ -3255,6 +3308,15 @@ function CanvasPrototype() {
     })
   }, [screenToFlowPosition, setEdges, setNodes])
 
+  const openCanvasContextMenu = useCallback((clientX: number, clientY: number) => {
+    const flowPosition = screenToFlowPosition({ x: clientX, y: clientY })
+    setDrawer(null)
+    setQuickAdd(null)
+    setContinuation(null)
+    setContextAdd(null)
+    setCanvasContextMenu({ x: clientX, y: clientY, flowPosition })
+  }, [screenToFlowPosition])
+
   const beginPlaylistSelection = useCallback((playlistId: string) => {
     setInteractionMode({ kind: 'playlist-clips', playlistId })
     setPlaylistSelection({ kind: 'playlist', playlistId })
@@ -3335,26 +3397,52 @@ function CanvasPrototype() {
     notify(`已删除${playlist.name}`)
   }, [notify, saveHistory, setPlaylists])
 
+  const openImageEditor = useCallback((nodeId: string) => {
+    const editorNode = nodesRef.current.find((node) => node.id === nodeId)
+    const operation = editorNode?.data.imageOperation?.operation
+    if (editorNode?.data.nodeType !== 'image' || (operation !== 'image-editor' && operation !== 'image-compose')) {
+      notify('未找到可打开的图片编辑器节点')
+      return
+    }
+    setDrawer(null)
+    setQuickAdd(null)
+    setContinuation(null)
+    setContextAdd(null)
+    setImageEditor({ canvasId: activeCanvasId, editorNodeId: nodeId, openedAt: Date.now() })
+  }, [activeCanvasId, notify])
+
   const addAuxiliaryTool = useCallback((tool: '播放列表' | '图片编辑器', positionOverride?: { x: number; y: number }, sourceNodeId?: string) => {
     const source = nodesRef.current.find((node) => node.id === sourceNodeId)
     if (tool === '图片编辑器') {
       const center = screenToFlowPosition({ x: window.innerWidth / 2, y: window.innerHeight / 2 })
-      const insertionPosition = positionOverride
-        ?? (source?.data.nodeType === 'image' ? nextImagePosition(source) : { x: center.x - 180, y: center.y - 125 })
-      imageEditorCommittedNodeRef.current = null
+      const position = positionOverride
+        ?? (source?.data.nodeType === 'image' ? nextImagePosition(source) : { x: center.x - 110, y: center.y - 110 })
+      const editorNode = buildImageEditorNode(`image-editor-${Date.now()}`, nodeCounter.current++, position)
+      const edge = source?.data.nodeType === 'image'
+        ? {
+            id: `edge-${source.id}-${editorNode.id}`,
+            source: source.id,
+            sourceHandle: 'output',
+            target: editorNode.id,
+            targetHandle: 'input',
+            type: 'canvas' as const,
+            data: { relationType: 'generation-input' as const, inputRole: 'default' as const },
+          }
+        : undefined
+      saveHistory()
+      updateCanvas(activeCanvasId, (canvas) => {
+        const nextEdges = [...canvas.edges.map((item) => ({ ...item, selected: false })), ...(edge ? [edge] : [])]
+        return {
+          ...canvas,
+          edges: nextEdges,
+          nodes: syncTargetReferences([...canvas.nodes.map((node) => ({ ...node, selected: false })), editorNode], nextEdges),
+        }
+      })
       setDrawer(null)
       setQuickAdd(null)
       setContinuation(null)
-      setImageEditor(source?.data.nodeType === 'image'
-        ? {
-            canvasId: activeCanvasId,
-            mode: 'derive',
-            sourceNodeId: source.id,
-            outputNodeId: source.data.imageOperation?.editorComposition ? source.id : undefined,
-            insertionPosition,
-            openedAt: Date.now(),
-          }
-        : { canvasId: activeCanvasId, mode: 'standalone', insertionPosition, openedAt: Date.now() })
+      setContextAdd(null)
+      notify(source?.data.nodeType === 'image' ? '图片编辑器已加入画布，并已关联上游图片' : '图片编辑器已加入画布')
       return
     }
     saveHistory()
@@ -3376,7 +3464,7 @@ function CanvasPrototype() {
       ? { kind: 'clip', playlistId: playlist.id, clipId: playlist.activeClipId }
       : { kind: 'playlist', playlistId: playlist.id })
     notify(startsWithClip ? `已用${source.data.title}创建播放列表` : '播放列表已加入画布，点击 + 添加视频')
-  }, [activeCanvasId, nextImagePosition, notify, saveHistory, screenToFlowPosition, setPlaylists])
+  }, [activeCanvasId, nextImagePosition, notify, saveHistory, screenToFlowPosition, setPlaylists, updateCanvas])
 
   const saveImageEditor = useCallback((payload: ImageEditorCommitPayload): ImageEditorCommitResult => {
     if (!imageEditor) throw new Error('图片编辑器已关闭，无法保存')
@@ -3385,26 +3473,20 @@ function CanvasPrototype() {
     if (!currentCanvas) throw new Error('图片编辑器所属画布不存在')
 
     const createdAt = Date.now()
-    const committedOutput = imageEditorCommittedNodeRef.current
-    const cachedOutput = committedOutput
-      && committedOutput.canvasId === canvasId
-      && committedOutput.openedAt === imageEditor.openedAt
-      && committedOutput.node.data.nodeType === 'image'
-      ? committedOutput.node
-      : undefined
-    const existingOutputId = imageEditor.outputNodeId ?? cachedOutput?.id
-    const existingOutput = existingOutputId
-      ? currentCanvas.nodes.find((node) => node.id === existingOutputId && node.data.nodeType === 'image') ?? cachedOutput
-      : undefined
-    const isUpdating = Boolean(existingOutput)
-    const nodeIndex = isUpdating ? undefined : nodeCounter.current++
-    const outputNodeId = existingOutput?.id ?? `image-editor-${createdAt}-${nodeIndex}`
+    const existingOutput = currentCanvas.nodes.find((node) => (
+      node.id === imageEditor.editorNodeId
+      && node.data.nodeType === 'image'
+      && (node.data.imageOperation?.operation === 'image-editor' || node.data.imageOperation?.operation === 'image-compose')
+    ))
+    if (!existingOutput) throw new Error('图片编辑器节点已不存在')
+    const isUpdating = Boolean(existingOutput.data.imageOperation?.editorComposition)
+    const outputNodeId = existingOutput.id
     const composition = structuredClone(payload.composition)
     const media = structuredClone(payload.media)
     const validSourceNodeIds = Array.from(new Set(payload.sourceNodeIds))
       .filter((nodeId) => nodeId !== outputNodeId && currentCanvas.nodes.some((node) => node.id === nodeId))
     composition.sourceNodeIds = validSourceNodeIds
-    const operation: Extract<ImageOperation, 'image-editor' | 'image-compose'> = validSourceNodeIds.length > 1 ? 'image-compose' : 'image-editor'
+    const operation: Extract<ImageOperation, 'image-editor' | 'image-compose'> = 'image-editor'
     const aspectRatio = composition.aspectRatio === 'custom'
       ? `${composition.width}:${composition.height}`
       : composition.aspectRatio
@@ -3414,30 +3496,23 @@ function CanvasPrototype() {
       prompt: composition.prompt?.trim() || undefined,
       editorComposition: composition,
     }
-    const baseNode = existingOutput ?? buildCanvasNode(
-      outputNodeId,
-      'image',
-      'created',
-      nodeIndex ?? nodeCounter.current,
-      imageEditor.insertionPosition,
-    )
+    const baseNode = existingOutput
     const outputNode: CanvasFlowNode = {
       ...baseNode,
       type: 'image',
       selected: true,
-      style: existingOutput?.style ?? { width: 360 },
+      style: existingOutput.style ?? { width: 360 },
       data: {
         ...baseNode.data,
         nodeType: 'image',
-        title: existingOutput?.data.title
-          ?? `图片编辑结果 ${nodeIndex ?? ''}`.trim(),
-        content: existingOutput?.data.content?.trim() || composition.prompt?.trim() || '图片编辑器结果',
+        title: existingOutput.data.title || '图片编辑器',
+        content: composition.prompt?.trim() || existingOutput.data.content?.trim() || '图片编辑结果',
         sourceKind: 'generated',
         status: 'success',
         progress: 100,
         media,
-        mediaVariant: existingOutput?.data.mediaVariant,
-        favorite: existingOutput?.data.favorite ?? false,
+        mediaVariant: existingOutput.data.mediaVariant,
+        favorite: existingOutput.data.favorite ?? false,
         starterReplaceable: false,
         imageOperation,
         references: [],
@@ -3462,46 +3537,21 @@ function CanvasPrototype() {
     }
 
     const applyImageEditorCommit = (canvas: CanvasDocument): CanvasDocument => {
-      const nextEdges = detachImageEditorResultEdges(canvas.edges, outputNodeId)
-        .map((edge) => ({ ...edge, selected: false }))
-      const nextNodes = canvas.nodes.some((node) => node.id === outputNodeId)
-        ? canvas.nodes.map((node) => node.id === outputNodeId ? outputNode : { ...node, selected: false })
-        : [...canvas.nodes.map((node) => ({ ...node, selected: false })), outputNode]
+      const nextEdges = canvas.edges.map((edge) => ({ ...edge, selected: false }))
+      const nextNodes = canvas.nodes.map((node) => node.id === outputNodeId ? outputNode : { ...node, selected: false })
       return {
         ...canvas,
         nodes: syncTargetReferences(nextNodes, nextEdges),
         edges: nextEdges,
-        tasks: [task, ...canvas.tasks],
+        tasks: [task, ...canvas.tasks.filter((existingTask) => existingTask.nodeId !== outputNodeId)],
       }
-    }
-    const committedCanvas = applyImageEditorCommit(currentCanvas)
-    imageEditorCommittedNodeRef.current = {
-      canvasId,
-      openedAt: imageEditor.openedAt,
-      node: structuredClone(outputNode),
-      snapshot: cloneCanvasSnapshot(
-        committedCanvas.nodes,
-        committedCanvas.edges,
-        committedCanvas.groups,
-        committedCanvas.tasks,
-        committedCanvas.playlists ?? [],
-      ),
     }
 
     saveHistory(canvasId)
     updateCanvas(canvasId, applyImageEditorCommit)
-    setImageEditor((current) => current?.openedAt === imageEditor.openedAt
-      ? { ...current, outputNodeId }
-      : current)
-    if (!isUpdating) {
-      window.setTimeout(() => {
-        if (activeCanvasIdRef.current !== canvasId) return
-        setCenter(imageEditor.insertionPosition.x + 180, imageEditor.insertionPosition.y + 125, { zoom: 0.84, duration: 280 })
-      }, 20)
-    }
-    notify(isUpdating ? '图片编辑结果已更新' : '图片编辑结果已加入画布')
+    notify(isUpdating ? '图片编辑结果已更新' : '图片编辑结果已保存到编辑器节点')
     return { outputNodeId }
-  }, [imageEditor, notify, saveHistory, setCenter, updateCanvas])
+  }, [imageEditor, notify, saveHistory, updateCanvas])
 
   const createPlaylistFromSelection = useCallback((videoNodes: CanvasFlowNode[]) => {
     if (videoNodes.length < 2 || !videoNodes.every(isPlayablePlaylistVideo)) return notify('请至少选择两个有效视频节点')
@@ -3725,6 +3775,7 @@ function CanvasPrototype() {
         setCanvasMenuOpen(false)
         setDrawer(null)
         setQuickAdd(null)
+        setCanvasContextMenu(null)
         setContinuation(null)
         setContextAdd(null)
         setAlignmentGuides([])
@@ -3814,6 +3865,7 @@ function CanvasPrototype() {
     completeVideoEdit,
     createAudioTrimDerivative,
     uploadNodeMedia,
+    openImageEditor,
     openContinuation,
     openContextAdd,
     beginReferenceSelection,
@@ -3834,7 +3886,7 @@ function CanvasPrototype() {
     videoEditAssets,
     seedanceComplianceAssets,
     notify,
-  }), [addPromptMarker, beginMarkerSelection, beginReferenceSelection, cancelPendingImageEditor, cancelPendingVideoOperation, changeVideoGenerationMode, completeImageEditor, completeImageUpscale, completeVideoEdit, completeVideoOperation, createAudioTrimDerivative, createImageDerivative, createLipSyncDerivative, deleteEdge, exitInteractionMode, hoveredPromptMarkerId, interactionMode, isConnectionTargetCandidate, isInteractionCandidate, markersForSource, notify, openContextAdd, openContinuation, prepareImageEditor, prepareImageUpscale, prepareVideoOperation, regenerateImage, removeReference, renameNode, retryGeneration, seedanceComplianceAssets, selectedItemCount, startTask, updateNode, updatePromptMarker, uploadNodeMedia, videoEditAssets])
+  }), [addPromptMarker, beginMarkerSelection, beginReferenceSelection, cancelPendingImageEditor, cancelPendingVideoOperation, changeVideoGenerationMode, completeImageEditor, completeImageUpscale, completeVideoEdit, completeVideoOperation, createAudioTrimDerivative, createImageDerivative, createLipSyncDerivative, deleteEdge, exitInteractionMode, hoveredPromptMarkerId, interactionMode, isConnectionTargetCandidate, isInteractionCandidate, markersForSource, notify, openContextAdd, openContinuation, openImageEditor, prepareImageEditor, prepareImageUpscale, prepareVideoOperation, regenerateImage, removeReference, renameNode, retryGeneration, seedanceComplianceAssets, selectedItemCount, startTask, updateNode, updatePromptMarker, uploadNodeMedia, videoEditAssets])
 
   const activeTasks = tasks.filter((task) => task.status === 'queued' || task.status === 'running').length
   const pinCounts = nodes.reduce<Record<PinColor, number>>((counts, node) => {
@@ -3946,8 +3998,14 @@ function CanvasPrototype() {
           assetFolders={assetFolders}
         />
 
-        <section className={`canvas-stage tool-${canvasTool} ${marquee ? 'is-marquee-selecting' : ''} ${spacePanning ? 'is-space-panning' : ''} ${interactionMode ? `is-interaction-mode interaction-${interactionMode.kind}` : ''}`} aria-label="节点画布" onContextMenu={(event) => {
-          if (isBlankCanvasTarget(event.target)) event.preventDefault()
+        <section className={`canvas-stage tool-${canvasTool} ${marquee ? 'is-marquee-selecting' : ''} ${spacePanning ? 'is-space-panning' : ''} ${interactionMode ? `is-interaction-mode interaction-${interactionMode.kind}` : ''}`} aria-label="节点画布" onContextMenuCapture={(event) => {
+          if (!canOpenCanvasContextMenu(event.target)) return
+          event.preventDefault()
+          event.stopPropagation()
+          marqueeRef.current = null
+          setMarquee(null)
+          suppressPaneClickRef.current = false
+          openCanvasContextMenu(event.clientX, event.clientY)
         }} onPointerDownCapture={(event) => {
           const onBlankPane = isBlankCanvasTarget(event.target)
           if (!onBlankPane) return
@@ -4047,6 +4105,16 @@ function CanvasPrototype() {
           if (!currentMarquee || event.pointerId !== currentMarquee.pointerId) return
           event.preventDefault()
           event.stopPropagation()
+          const isBlankRightClick = event.button === 2
+            && Math.hypot(event.clientX - currentMarquee.startX, event.clientY - currentMarquee.startY) <= 12
+          if (isBlankRightClick) {
+            marqueeRef.current = null
+            setMarquee(null)
+            if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId)
+            suppressPaneClickRef.current = false
+            openCanvasContextMenu(event.clientX, event.clientY)
+            return
+          }
           finishMarquee({ ...currentMarquee, currentX: event.clientX, currentY: event.clientY })
           marqueeRef.current = null
           setMarquee(null)
@@ -4099,6 +4167,7 @@ function CanvasPrototype() {
               if (interactionMode?.kind === 'playlist-clips') setInteractionMode(null)
               setPlaylistSelection(null)
               setQuickAdd(null)
+              setCanvasContextMenu(null)
               setContinuation(null)
               setContextAdd(null)
               setAlignmentGuides([])
@@ -4216,6 +4285,17 @@ function CanvasPrototype() {
           onClose={() => setQuickAdd(null)}
           ariaLabel="画布添加"
         />}
+        {canvasContextMenu && <CanvasBlankContextMenu
+          position={{ x: canvasContextMenu.x, y: canvasContextMenu.y }}
+          onUploadFiles={(files) => uploadFiles(files, canvasContextMenu.flowPosition)}
+          onOpenAssets={() => setDrawer('assets')}
+          onAddNode={(type) => addNode(type, 'created', canvasContextMenu.flowPosition)}
+          onAuxiliaryTool={(tool) => addAuxiliaryTool(tool, canvasContextMenu.flowPosition)}
+          onUndo={undo}
+          onRedo={redo}
+          onPaste={() => { void pasteTextNode(canvasContextMenu.flowPosition) }}
+          onClose={() => setCanvasContextMenu(null)}
+        />}
         {continuation && continuationSource && <ContinuationMenu
           position={{ x: continuation.x, y: continuation.y }}
           sourceType={continuationSource.data.nodeType}
@@ -4237,10 +4317,10 @@ function CanvasPrototype() {
           key={imageEditor.openedAt}
           source={imageEditorSource}
           assets={imageEditorAssets}
+          initialAssets={imageEditorInitialAssets}
           historyAssets={imageEditorHistoryAssets}
           initialComposition={imageEditorInitialComposition}
           onClose={() => {
-            imageEditorCommittedNodeRef.current = null
             setImageEditor(null)
           }}
           onSave={saveImageEditor}
@@ -4268,7 +4348,7 @@ function CanvasPrototype() {
           <button type="button" className="ui-tooltip-control" data-tooltip="放大" onClick={() => zoomIn({ duration: 140 })} aria-label="放大"><Plus size={15} /></button>
         </div>
 
-        <div className="prototype-note"><Sparkles size={14} /><span>V2.0 交互原型 · Mock 数据</span></div>
+        <div className="prototype-note"><Sparkles size={14} /><span>V2.0.1 交互原型 · Mock 数据</span></div>
         {toast && <div className={`toast ${toast.includes('\n') ? 'has-detail' : ''}`} role="status" aria-live="polite">{toast.includes('\n') ? <><Check size={18} /><span><strong>{toast.split('\n')[0]}</strong><small>{toast.split('\n')[1]}</small></span></> : /任务已进入队列|生成中|处理中|等待执行|^正在/.test(toast) ? <ShinyText text={toast} speed={1.8} color="#393638" shineColor="#ffffff" spread={92} /> : toast}</div>}
       </main>
     </CanvasActionContext.Provider>

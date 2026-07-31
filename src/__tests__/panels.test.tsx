@@ -2,7 +2,7 @@ import type { ComponentProps } from 'react'
 import { fireEvent, render, screen, within } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 import { initialNodes, initialTasks } from '../mockData'
-import { ContextMenu, ContinuationMenu, DrawerPanel, QuickAddMenu, continuationItemsForSource } from '../panels'
+import { CanvasBlankContextMenu, ContextMenu, ContinuationMenu, DrawerPanel, QuickAddMenu, continuationItemsForSource } from '../panels'
 import type { CanvasGroup, MediaNodeType } from '../types'
 
 function drawerProps(overrides: Partial<ComponentProps<typeof DrawerPanel>> = {}): ComponentProps<typeof DrawerPanel> {
@@ -75,6 +75,77 @@ describe('unified add menu', () => {
       expect(screen.getByRole('button', { name: new RegExp(`^${label} `) })).toBeEnabled()
     }
     expect(screen.getByLabelText('选择上传文件')).toBeInTheDocument()
+  })
+})
+
+describe('blank canvas context menu', () => {
+  it('keeps the requested dividers, local upload and node submenu in place', () => {
+    const onOpenAssets = vi.fn()
+    const onAddNode = vi.fn()
+    const onAuxiliaryTool = vi.fn()
+    const onUploadFiles = vi.fn()
+    const onUndo = vi.fn()
+    const onRedo = vi.fn()
+    const onPaste = vi.fn()
+    const onClose = vi.fn()
+
+    render(<CanvasBlankContextMenu
+      position={{ x: 200, y: 160 }}
+      onUploadFiles={onUploadFiles}
+      onOpenAssets={onOpenAssets}
+      onAddNode={onAddNode}
+      onAuxiliaryTool={onAuxiliaryTool}
+      onUndo={onUndo}
+      onRedo={onRedo}
+      onPaste={onPaste}
+      onClose={onClose}
+    />)
+
+    const menu = screen.getByRole('menu', { name: '画布操作' })
+    expect(within(menu).getAllByRole('separator')).toHaveLength(2)
+    expect(within(menu).getByRole('menuitem', { name: '撤销 ⌘Z' })).toBeInTheDocument()
+    expect(within(menu).getByRole('menuitem', { name: '重做 ⇧⌘Z' })).toBeInTheDocument()
+    expect(within(menu).getByRole('menuitem', { name: '粘贴 ⌘V' })).toBeInTheDocument()
+
+    const files = [new File(['image'], 'frame.png', { type: 'image/png' })]
+    fireEvent.change(within(menu).getByLabelText('选择上传文件'), { target: { files } })
+    expect(onUploadFiles).toHaveBeenCalledWith(files)
+    fireEvent.click(within(menu).getByRole('menuitem', { name: '添加资产' }))
+    fireEvent.click(within(menu).getByRole('menuitem', { name: '添加节点' }))
+
+    const nodeMenu = screen.getByRole('menu', { name: '添加节点' })
+    expect(within(nodeMenu).getByRole('menuitem', { name: /文本 脚本、广告词、品牌文案/ })).toBeInTheDocument()
+    expect(within(nodeMenu).getAllByRole('menuitem')).toHaveLength(4)
+    fireEvent.click(within(nodeMenu).getByRole('menuitem', { name: /视频/ }))
+
+    expect(onOpenAssets).toHaveBeenCalledOnce()
+    expect(onAddNode).toHaveBeenCalledWith('video')
+    expect(onAuxiliaryTool).not.toHaveBeenCalled()
+    expect(onUndo).not.toHaveBeenCalled()
+    expect(onRedo).not.toHaveBeenCalled()
+    expect(onPaste).not.toHaveBeenCalled()
+    expect(onClose).toHaveBeenCalledTimes(3)
+  })
+
+  it('opens the auxiliary tools submenu at the same menu surface', () => {
+    const onAuxiliaryTool = vi.fn()
+    render(<CanvasBlankContextMenu
+      position={{ x: 200, y: 160 }}
+      onUploadFiles={vi.fn()}
+      onOpenAssets={vi.fn()}
+      onAddNode={vi.fn()}
+      onAuxiliaryTool={onAuxiliaryTool}
+      onUndo={vi.fn()}
+      onRedo={vi.fn()}
+      onPaste={vi.fn()}
+      onClose={vi.fn()}
+    />)
+
+    fireEvent.click(screen.getByRole('menuitem', { name: '添加辅助工具' }))
+    const toolMenu = screen.getByRole('menu', { name: '辅助工具' })
+    expect(within(toolMenu).getByRole('menuitem', { name: /播放列表 时间轴串联多段素材/ })).toBeInTheDocument()
+    fireEvent.click(within(toolMenu).getByRole('menuitem', { name: /图片编辑器/ }))
+    expect(onAuxiliaryTool).toHaveBeenCalledWith('图片编辑器')
   })
 })
 

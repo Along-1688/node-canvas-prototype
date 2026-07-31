@@ -285,6 +285,37 @@ describe('real image editor workspace wiring', () => {
     expect(within(assetsPanel).queryByRole('button', { name: '添加资产 收藏图片' })).not.toBeInTheDocument()
   })
 
+  it('places every linked upstream image onto a new editor project', async () => {
+    const { FabricImage } = await import('fabric')
+    const makeImage = () => {
+      const element = document.createElement('img')
+      element.width = 640
+      element.height = 480
+      Object.defineProperty(element, 'naturalWidth', { configurable: true, value: 640 })
+      Object.defineProperty(element, 'naturalHeight', { configurable: true, value: 480 })
+      return element
+    }
+    vi.spyOn(FabricImage, 'fromURL').mockImplementation(async () => new FabricImage(makeImage(), { originX: 'center', originY: 'center' }))
+
+    render(
+      <ImageEditorWorkspace
+        assets={[]}
+        initialAssets={[
+          { id: 'linked-a', sourceNodeId: 'image-a', title: '上游图片 A', src: 'data:image/png;base64,linked-a' },
+          { id: 'linked-b', sourceNodeId: 'image-b', title: '上游图片 B', src: 'data:image/png;base64,linked-b' },
+        ]}
+        onClose={vi.fn()}
+        onSave={vi.fn().mockResolvedValue({ outputNodeId: 'saved-editor-node' })}
+      />,
+    )
+
+    await waitFor(() => expect(fabricHarness.canvases.at(-1)?.getObjects()).toHaveLength(2))
+    expect(fabricHarness.canvases.at(-1)?.getObjects()).toMatchObject([
+      { sourceNodeId: 'image-a', label: '上游图片 A' },
+      { sourceNodeId: 'image-b', label: '上游图片 B' },
+    ])
+  })
+
   it('anchors canvas background settings beside the top-left trigger', () => {
     render(
       <ImageEditorWorkspace

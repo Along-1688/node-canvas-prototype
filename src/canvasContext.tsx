@@ -40,6 +40,7 @@ interface CanvasActions {
   completeVideoEdit: (nodeId: string, result: Extract<VideoOperationResult, { operation: 'edit' }>) => void
   createAudioTrimDerivative: (nodeId: string, result: AudioOperationResult) => void
   uploadNodeMedia: (nodeId: string, file: File) => void
+  openImageEditor: (nodeId: string) => void
   openContinuation: (nodeId: string, clientX: number, clientY: number) => void
   openContextAdd: (nodeId: string, clientX: number, clientY: number) => void
   beginReferenceSelection: (targetNodeId: string, replaceSourceNodeId?: string, role?: GenerationReferenceRole) => void

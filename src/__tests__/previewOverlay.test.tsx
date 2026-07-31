@@ -55,6 +55,8 @@ describe('node fullscreen preview', () => {
     expect(within(dialog).getByText('提示词')).toBeInTheDocument()
     expect(within(dialog).getByText('保留主体构图，画面清晰自然。')).toBeInTheDocument()
     expect(within(dialog).getByText('信息')).toBeInTheDocument()
+    expect(within(dialog).getByText('日期')).toBeInTheDocument()
+    expect(within(dialog).getByText('2026/07/31')).toBeInTheDocument()
     expect(within(dialog).getByRole('link', { name: `下载${nodeType === 'image' ? '图片' : '视频'}` })).toHaveAttribute('download')
   })
 
@@ -75,6 +77,26 @@ describe('node fullscreen preview', () => {
 
     const dialog = screen.getByRole('dialog', { name: '素材图片全屏预览' })
     expect(within(dialog).getByText('暂无提示词')).toBeInTheDocument()
+  })
+
+  it('does not show a model for an image editor result, even if legacy node data contains one', () => {
+    renderPreview({
+      nodeType: 'image',
+      title: '图片编辑器',
+      content: '图片编辑结果',
+      status: 'success',
+      sourceKind: 'generated',
+      createdAt: '2026/07/30',
+      modelId: 'seedream-3',
+      imageOperation: { operation: 'image-editor', aspectRatio: 'custom' },
+      media: { url: '/preview.png', mimeType: 'image/png', width: 2000, height: 2000 },
+    })
+
+    const dialog = screen.getByRole('dialog', { name: '图片编辑器全屏预览' })
+    expect(within(dialog).getByText('图片工具 · 图片编辑')).toBeInTheDocument()
+    expect(within(dialog).queryByText('模型')).not.toBeInTheDocument()
+    expect(within(dialog).queryByText('Seedream 3.0')).not.toBeInTheDocument()
+    expect(within(dialog).getByText('2026/07/30')).toBeInTheDocument()
   })
 
   it('closes the active preview with Escape', () => {

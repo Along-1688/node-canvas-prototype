@@ -648,9 +648,14 @@ function previewSourceLabel(data: CanvasNodeData) {
 }
 
 function previewModelLabel(data: CanvasNodeData) {
+  if (data.sourceKind !== 'generated' || data.imageOperation || data.videoOperation || data.playlistComposition) return undefined
   if (data.nodeType === 'image') return data.modelId === 'seedream-3' ? 'Seedream 3.0' : data.modelId
   if (data.nodeType === 'video') return videoModelCapabilities.find((item) => item.id === data.modelId)?.label ?? data.modelId
   return undefined
+}
+
+function previewCreatedAt(data: CanvasNodeData) {
+  return data.createdAt?.trim() || '2026/07/31'
 }
 
 function previewAspectRatio(data: CanvasNodeData) {
@@ -686,6 +691,7 @@ function PreviewMetadata({ data, onClose }: { data: CanvasNodeData; onClose: () 
     ...(data.nodeType === 'video' && data.duration !== undefined ? [{ label: '时长', value: formatVideoTime(data.duration) }] : []),
     ...(data.nodeType === 'video' && data.media?.hasAudio !== undefined ? [{ label: '音频', value: data.media.hasAudio ? '有' : '无' }] : []),
     ...(format ? [{ label: '格式', value: format }] : []),
+    { label: '日期', value: previewCreatedAt(data) },
   ]
   const imageDownload = data.nodeType === 'image' ? imageDownloadSource(data) : undefined
   const downloadLabel = data.nodeType === 'image' ? '下载图片' : '下载视频'

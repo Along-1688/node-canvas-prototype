@@ -349,6 +349,8 @@ export interface CanvasNodeData extends Record<string, unknown> {
   title: string
   status: GenerationStatus
   sourceKind: SourceKind
+  /** Asset creation date shown in the media full-screen information panel. */
+  createdAt?: string
   content?: string
   localPrompt?: string
   modeId?: string

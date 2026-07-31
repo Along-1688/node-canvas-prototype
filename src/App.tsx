@@ -342,6 +342,13 @@ function canOpenCanvasContextMenu(target: EventTarget | null) {
   return !target.closest('.react-flow__node, .react-flow__edge, .canvas-group-frame, .canvas-playlist, .floating-popover, .quick-add-menu, .continuation-menu, .multi-selection-toolbar, .canvas-interaction-banner, .edge-action, .react-flow__controls, .react-flow__panel, .react-flow__minimap, [data-canvas-overlay="true"]')
 }
 
+function formatNodeCreatedAt(date = new Date()) {
+  const year = date.getFullYear()
+  const month = String(date.getMonth() + 1).padStart(2, '0')
+  const day = String(date.getDate()).padStart(2, '0')
+  return `${year}/${month}/${day}`
+}
+
 function buildCanvasNode(
   id: string,
   type: MediaNodeType,
@@ -360,6 +367,7 @@ function buildCanvasNode(
     title: `${{ text: '文本', image: '图片', video: '视频', audio: '音频' }[type]}节点 ${index}`,
     status: created ? 'idle' : 'success',
     sourceKind: source,
+    createdAt: formatNodeCreatedAt(),
     content,
     mediaVariant: source === 'virtual-ip' ? 'ip' : type === 'image' ? 'dog' : type === 'audio' ? 'audio' : 'anime',
     localPrompt: created ? '' : undefined,
@@ -416,6 +424,8 @@ function buildImageEditorNode(
       status: 'idle',
       mediaVariant: undefined,
       media: undefined,
+      modeId: undefined,
+      modelId: undefined,
       imageGeneration: undefined,
       cost: undefined,
       imageOperation: { operation: 'image-editor', aspectRatio: 'custom' },
@@ -3512,6 +3522,11 @@ function CanvasPrototype() {
         progress: 100,
         media,
         mediaVariant: existingOutput.data.mediaVariant,
+        modeId: undefined,
+        modelId: undefined,
+        imageGeneration: undefined,
+        cost: undefined,
+        createdAt: isUpdating ? existingOutput.data.createdAt ?? formatNodeCreatedAt() : formatNodeCreatedAt(),
         favorite: existingOutput.data.favorite ?? false,
         starterReplaceable: false,
         imageOperation,

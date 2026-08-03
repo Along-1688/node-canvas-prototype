@@ -69,7 +69,7 @@ import {
   ZoomIn,
 } from 'lucide-react'
 import { useCanvasActions, type CanvasInteractionMode } from './canvasContext'
-import { canFavoriteMediaNode } from './assetEligibility'
+import { canFavoriteMediaNode, canUploadToEmptyMediaNode } from './assetEligibility'
 import { AnchoredPopover } from './floating'
 import { ImageEditorCompositionPreview } from './imageEditor'
 import { ShinyText } from './ShinyText'
@@ -1819,7 +1819,7 @@ export const ImageNode = memo(function ImageNode({ id, data, selected }: NodePro
       <ConnectionHandles nodeId={id} />
       {focused && hasContent && !isGenerating && !pendingImageEditor && <ImageToolbar id={id} data={data} activeTool={activeTool} onTool={(tool) => setActiveTool((current) => current === tool ? null : tool)} onExpand={() => setPreviewOpen(true)} />}
       <NodeHeader id={id} data={data} icon={<ImageIcon size={13} />} />
-      {focused && !hasContent && !isGenerating && data.status !== 'failed' && !pendingUpscale && <><button type="button" className="empty-node-upload nodrag" onClick={() => uploadInputRef.current?.click()}><Upload size={14} />上传</button><input ref={uploadInputRef} className="sr-only" type="file" accept="image/*" aria-label="上传图片到当前节点" onChange={(event) => { const file = event.target.files?.[0]; if (file) uploadNodeMedia(id, file); event.currentTarget.value = '' }} /></>}
+      {focused && !hasContent && !isGenerating && data.status !== 'failed' && !pendingUpscale && canUploadToEmptyMediaNode(data) && <><button type="button" className="empty-node-upload nodrag" onClick={() => uploadInputRef.current?.click()}><Upload size={14} />上传</button><input ref={uploadInputRef} className="sr-only" type="file" accept="image/*" aria-label="上传图片到当前节点" onChange={(event) => { const file = event.target.files?.[0]; if (file) uploadNodeMedia(id, file); event.currentTarget.value = '' }} /></>}
       <div className="node-surface image-surface" style={{ aspectRatio: visualRatio }} onClick={(event) => {
         if (interactionMode?.kind === 'marker' && isInteractionCandidate(id)) {
           event.stopPropagation()
@@ -2377,7 +2377,7 @@ export const VideoNode = memo(function VideoNode({ id, data, selected }: NodePro
     <VideoOperationOutputHandle />
     {focused && hasContent && !pendingOperation && <VideoToolbar id={id} data={data} onExpand={() => setPreviewOpen(true)} onLipSync={() => setLipSyncOpen((open) => !open)} />}
     <NodeHeader id={id} data={data} icon={<Video size={13} />} />
-    {focused && !hasResult && data.status !== 'failed' && !pendingOperation && <><button type="button" className="empty-node-upload nodrag" onClick={() => uploadInputRef.current?.click()}><Upload size={14} />上传</button><input ref={uploadInputRef} className="sr-only" type="file" accept="video/*" aria-label="上传视频到当前节点" onChange={(event) => { const file = event.target.files?.[0]; if (file) uploadNodeMedia(id, file); event.currentTarget.value = '' }} /></>}
+    {focused && !hasResult && data.status !== 'failed' && !pendingOperation && canUploadToEmptyMediaNode(data) && <><button type="button" className="empty-node-upload nodrag" onClick={() => uploadInputRef.current?.click()}><Upload size={14} />上传</button><input ref={uploadInputRef} className="sr-only" type="file" accept="video/*" aria-label="上传视频到当前节点" onChange={(event) => { const file = event.target.files?.[0]; if (file) uploadNodeMedia(id, file); event.currentTarget.value = '' }} /></>}
     <div className="node-surface video-preview">
         {!hasResult && data.status !== 'failed' && <div className="video-empty"><span>{pendingOperation ? <WandSparkles size={21} /> : <Play size={21} />}</span>{pendingOperation ? <strong>{videoOperationLabels[pendingOperation.operation].title}</strong> : <strong className="sr-only">视频</strong>}</div>}
         {hasContent && !isGenerating && <VideoPlayer label={`${data.title}视频播放器`} media={data.media} compact />}
@@ -2653,7 +2653,7 @@ export const AudioNode = memo(function AudioNode({ id, data, selected }: NodePro
     <ConnectionHandles nodeId={id} />
     {focused && hasContent && !trimming && <div className="media-toolbar compact-media-toolbar zoom-stable-ui nodrag"><IconAction label="裁剪音频" onClick={() => setTrimming(true)}><Scissors size={15} /></IconAction><IconAction label="Seedance 2.0 合规验证" onClick={verifySeedance}><ShieldCheck size={15} /></IconAction><span className="toolbar-divider" /><PinControl id={id} value={data.pinColor} /><IconAction label="下载音频" onClick={() => { startDownload(`${data.title}.txt`, '', data.content ?? ''); notify('已下载音频') }}><Download size={15} /></IconAction></div>}
     <NodeHeader id={id} data={data} icon={<Waves size={13} />} draggable />
-    {focused && !hasContent && <><button type="button" className="empty-node-upload nodrag" onClick={() => uploadInputRef.current?.click()}><Upload size={14} />上传</button><input ref={uploadInputRef} className="sr-only" type="file" accept="audio/*,video/*" aria-label="上传音频或视频到当前节点" onChange={(event) => { const file = event.target.files?.[0]; if (file) uploadNodeMedia(id, file); event.currentTarget.value = '' }} /></>}
+    {focused && !hasContent && canUploadToEmptyMediaNode(data) && <><button type="button" className="empty-node-upload nodrag" onClick={() => uploadInputRef.current?.click()}><Upload size={14} />上传</button><input ref={uploadInputRef} className="sr-only" type="file" accept="audio/*,video/*" aria-label="上传音频或视频到当前节点" onChange={(event) => { const file = event.target.files?.[0]; if (file) uploadNodeMedia(id, file); event.currentTarget.value = '' }} /></>}
     <div className="node-surface audio-surface">
       {hasContent ? trimming ? <AudioTrimEditor id={id} duration={duration} sourceUrl={data.media?.url} onCancel={() => setTrimming(false)} /> : <AudioPlayer data={data} /> : <div className="empty-media-node empty-audio-node"><Music2 size={28} /><strong className="sr-only">音频</strong></div>}
     </div>

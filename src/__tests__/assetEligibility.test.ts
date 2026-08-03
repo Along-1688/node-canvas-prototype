@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { canFavoriteMediaNode, shouldSyncNodeToAssets } from '../assetEligibility'
+import { canFavoriteMediaNode, canUploadToEmptyMediaNode, shouldSyncNodeToAssets } from '../assetEligibility'
 import type { CanvasNodeData } from '../types'
 
 function mediaData(overrides: Partial<CanvasNodeData> = {}): CanvasNodeData {
@@ -28,5 +28,14 @@ describe('asset eligibility', () => {
   ])('keeps %s outside favorites and the asset library', (_label, data) => {
     expect(canFavoriteMediaNode(data)).toBe(false)
     expect(shouldSyncNodeToAssets(data)).toBe(false)
+  })
+
+  it('keeps upload as the fallback for media nodes without generation inputs', () => {
+    expect(canUploadToEmptyMediaNode(mediaData({ status: 'ready', content: '' }))).toBe(true)
+    expect(canUploadToEmptyMediaNode(mediaData({
+      status: 'ready',
+      content: '',
+      references: [{ nodeId: 'upstream-text', nodeType: 'text', label: '上游文本', content: '一段提示词' }],
+    }))).toBe(false)
   })
 })

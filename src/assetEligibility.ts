@@ -18,3 +18,11 @@ export function canFavoriteMediaNode(data: CanvasNodeData) {
 export function shouldSyncNodeToAssets(data: CanvasNodeData) {
   return data.sourceKind === 'generated' && !isImageEditorResult(data)
 }
+
+/**
+ * Local upload is only a fallback for a genuinely empty media node. Once a
+ * generation-input edge exists, that upstream content is the node's input.
+ */
+export function canUploadToEmptyMediaNode(data: CanvasNodeData) {
+  return (data.references?.length ?? 0) === 0
+}

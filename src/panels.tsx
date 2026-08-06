@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState, type RefObject } from 'react'
 import {
   AlertCircle,
   Check,
@@ -28,7 +28,7 @@ import {
 } from 'lucide-react'
 import { allowedContextSourcesForTarget, allowedTargetsForSource, labelForType } from './domain'
 import { canFavoriteMediaNode } from './assetEligibility'
-import { AnchoredPopover } from './floating'
+import { AnchoredPopover, useDismissableLayer } from './floating'
 import { MediaTypeIcon, mediaNodeTypes, mediaTypeLabels } from './mediaTypes'
 import type { AssetFolder, CanvasFlowNode, CanvasGroup, CanvasPlaylist, DrawerKey, GenerationTask, MediaNodeType, SessionAsset } from './types'
 
@@ -36,6 +36,7 @@ export type AuxiliaryTool = '播放列表' | '图片编辑器'
 
 interface DrawerProps {
   active: DrawerKey
+  rootRef?: RefObject<HTMLElement | null>
   nodes: CanvasFlowNode[]
   tasks: GenerationTask[]
   onClose: () => void
@@ -67,9 +68,9 @@ const drawerTitles: Record<Exclude<DrawerKey, null>, string> = {
   add: '添加', assets: '资产', content: '画布内容', shortcuts: '快捷键', tutorial: '画布教程',
 }
 
-function DrawerShell({ active, onClose, children }: { active: Exclude<DrawerKey, null>; onClose: () => void; children: React.ReactNode }) {
+function DrawerShell({ active, onClose, rootRef, children }: { active: Exclude<DrawerKey, null>; onClose: () => void; rootRef?: RefObject<HTMLElement | null>; children: React.ReactNode }) {
   return (
-    <aside className={`left-drawer drawer-${active}`} aria-label={drawerTitles[active]}>
+    <aside ref={rootRef} className={`left-drawer drawer-${active}`} aria-label={drawerTitles[active]}>
       <header className="drawer-header"><h2>{drawerTitles[active]}</h2><button type="button" onClick={onClose} aria-label={`关闭${drawerTitles[active]}`}><X size={18} /></button></header>
       {children}
     </aside>
@@ -139,8 +140,10 @@ export function QuickAddMenu({ position, onAddNode, onUploadFiles, onAuxiliaryTo
   ariaLabel?: string
 }) {
   const menuPosition = resolveMenuPosition(position, 540)
+  const rootRef = useRef<HTMLElement>(null)
+  useDismissableLayer({ open: true, onClose, boundaryRefs: [rootRef] })
   return (
-    <aside className="quick-add-menu unified-add-menu" style={menuPosition} aria-label={ariaLabel}>
+    <aside ref={rootRef} className="quick-add-menu unified-add-menu" style={menuPosition} aria-label={ariaLabel}>
       <header><strong>添加</strong><button type="button" onClick={onClose} aria-label={`关闭${ariaLabel}`}><X size={16} /></button></header>
       <AddMenuContent onAddNode={onAddNode} onUploadFiles={onUploadFiles} onAuxiliaryTool={onAuxiliaryTool} />
     </aside>
@@ -177,20 +180,7 @@ export function CanvasBlankContextMenu({
     top: Math.min(Math.max(14, position.y), Math.max(14, window.innerHeight - estimatedHeight)),
   }
 
-  useEffect(() => {
-    const dismiss = (event: PointerEvent) => {
-      if (!rootRef.current?.contains(event.target as Node)) onClose()
-    }
-    const closeOnEscape = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') onClose()
-    }
-    document.addEventListener('pointerdown', dismiss, true)
-    window.addEventListener('keydown', closeOnEscape)
-    return () => {
-      document.removeEventListener('pointerdown', dismiss, true)
-      window.removeEventListener('keydown', closeOnEscape)
-    }
-  }, [onClose])
+  useDismissableLayer({ open: true, onClose, boundaryRefs: [rootRef] })
 
   const invoke = (action: () => void) => {
     action()
@@ -281,14 +271,17 @@ export function ContinuationMenu({ position, sourceType, onAddNode, onAuxiliaryT
 }) {
   const items = continuationItemsForSource(sourceType)
   const menuPosition = resolveMenuPosition(position, 74 + items.length * 47)
+  const rootRef = useRef<HTMLElement>(null)
   const firstItemRef = useRef<HTMLButtonElement>(null)
+
+  useDismissableLayer({ open: true, onClose, boundaryRefs: [rootRef] })
 
   useEffect(() => {
     firstItemRef.current?.focus()
   }, [])
 
   return (
-    <aside className="quick-add-menu unified-add-menu continuation-add-menu" style={menuPosition} aria-label={ariaLabel}>
+    <aside ref={rootRef} className="quick-add-menu unified-add-menu continuation-add-menu" style={menuPosition} aria-label={ariaLabel}>
       <header><strong>引用该节点生成</strong><button type="button" onClick={onClose} aria-label={`关闭${ariaLabel}`}><X size={16} /></button></header>
       <div className="add-menu-content continuation-menu-content">
         <div className="add-list">
@@ -324,14 +317,17 @@ export function ContextMenu({ position, target, onAddNode, onClose, ariaLabel = 
 }) {
   const sourceTypes = allowedContextSourcesForTarget(target)
   const menuPosition = resolveMenuPosition(position, 74 + sourceTypes.length * 47)
+  const rootRef = useRef<HTMLElement>(null)
   const firstItemRef = useRef<HTMLButtonElement>(null)
+
+  useDismissableLayer({ open: true, onClose, boundaryRefs: [rootRef] })
 
   useEffect(() => {
     firstItemRef.current?.focus()
   }, [])
 
   return (
-    <aside className="quick-add-menu unified-add-menu context-add-menu" style={menuPosition} aria-label={ariaLabel}>
+    <aside ref={rootRef} className="quick-add-menu unified-add-menu context-add-menu" style={menuPosition} aria-label={ariaLabel}>
       <header><strong>添加上下文</strong><button type="button" onClick={onClose} aria-label={`关闭${ariaLabel}`}><X size={16} /></button></header>
       <div className="add-menu-content">
         <div className="add-list">
@@ -719,5 +715,5 @@ export function DrawerPanel(props: DrawerProps) {
     shortcuts: <ShortcutsDrawer />,
     tutorial: <TutorialDrawer />,
   }[props.active]
-  return <DrawerShell active={props.active} onClose={props.onClose}>{content}</DrawerShell>
+  return <DrawerShell active={props.active} onClose={props.onClose} rootRef={props.rootRef}>{content}</DrawerShell>
 }

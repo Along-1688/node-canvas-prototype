@@ -93,6 +93,7 @@ import {
   scaledExportDimensions,
 } from './imageEditorBehavior'
 import { imageEditorDimensions } from './imageEditorModel'
+import { useDismissableLayer } from './floating'
 import type { Layer as PsdLayer, Psd } from 'ag-psd'
 
 export interface ImageEditorWorkspaceProps {
@@ -485,9 +486,9 @@ function configureObject(object: EditorObject, metadata: Partial<EditorObject> =
     ...metadata,
   })
   object.set({
-    borderColor: '#c4886a',
+    borderColor: '#e0e0e0',
     cornerColor: '#ffffff',
-    cornerStrokeColor: '#c4886a',
+    cornerStrokeColor: '#e0e0e0',
     cornerStyle: 'rect',
     cornerSize: 9,
     transparentCorners: false,
@@ -797,7 +798,7 @@ function cropControl() {
     actionName: 'scale',
     render(context, left, top) {
       context.save()
-      context.fillStyle = '#e86b31'
+      context.fillStyle = '#e6e6e6'
       context.beginPath()
       context.arc(left, top, 14, 0, Math.PI * 2)
       context.fill()
@@ -1157,6 +1158,9 @@ export function ImageEditorWorkspace({
   const artboardWrapRef = useRef<HTMLDivElement>(null)
   const uploadInputRef = useRef<HTMLInputElement>(null)
   const ratioMenuRef = useRef<HTMLDivElement>(null)
+  const exportTriggerRef = useRef<HTMLButtonElement>(null)
+  const exportMenuRef = useRef<HTMLDivElement>(null)
+  const layerContextMenuRef = useRef<HTMLDivElement>(null)
   const layerListRef = useRef<HTMLDivElement>(null)
   const closeDialogRef = useRef<HTMLDivElement>(null)
   const poseDialogRef = useRef<HTMLDivElement>(null)
@@ -1251,6 +1255,10 @@ export function ImageEditorWorkspace({
   const [keyboardGrabbedLayerId, setKeyboardGrabbedLayerId] = useState<string | null>(null)
   const [propertyPanel, setPropertyPanel] = useState<PropertyPanel>(null)
   const [feedback, setFeedback] = useState<string | null>(null)
+
+  useDismissableLayer({ open: ratioMenuOpen, onClose: () => setRatioMenuOpen(false), boundaryRefs: [ratioMenuRef] })
+  useDismissableLayer({ open: exportMenuOpen, onClose: () => setExportMenuOpen(false), boundaryRefs: [exportTriggerRef, exportMenuRef] })
+  useDismissableLayer({ open: Boolean(layerContextMenu), onClose: () => setLayerContextMenu(null), boundaryRefs: [layerContextMenuRef] })
 
   const imageAssets = useMemo(() => {
     const deduped = new Map<string, ImageEditorAsset>()
@@ -2085,7 +2093,7 @@ export function ImageEditorWorkspace({
       cornerSize: 44,
       transparentCorners: false,
       borderColor: '#ffffff',
-      cornerColor: '#e86b31',
+      cornerColor: '#e6e6e6',
       minScaleLimit: Math.max(10 / initialWidth, 10 / initialHeight),
     })
     cropRect.controls = { br: cropControl() }
@@ -3848,9 +3856,7 @@ export function ImageEditorWorkspace({
           return
         }
         const target = event.target as HTMLElement
-        if (layerContextMenu && !target.closest('.image-editor-layer-context-menu')) setLayerContextMenu(null)
         if (propertyPanel && !target.closest('.image-editor-context-toolbar, .image-editor-property-popover, .image-editor-color-control')) setPropertyPanel(null)
-        if (ratioMenuOpen && !ratioMenuRef.current?.contains(target)) setRatioMenuOpen(false)
       }}
     >
       <header className="image-editor-header">
@@ -3861,7 +3867,11 @@ export function ImageEditorWorkspace({
               aria-label="画布比例"
               aria-haspopup="menu"
               aria-expanded={ratioMenuOpen}
-              onClick={() => setRatioMenuOpen((current) => !current)}
+              onClick={() => {
+                setExportMenuOpen(false)
+                setLayerContextMenu(null)
+                setRatioMenuOpen((current) => !current)
+              }}
             >
               <span>{aspectRatio}</span>
               <ChevronDown size={14} />
@@ -3967,14 +3977,18 @@ export function ImageEditorWorkspace({
         {propertyPanelContent}
 
         <div className="image-editor-header-actions" inert={interfaceLocked} aria-hidden={interfaceLocked || undefined}>
-          <button type="button" data-tooltip="导出图片" aria-label="导出图片" aria-expanded={exportMenuOpen} onClick={() => setExportMenuOpen((current) => !current)}><Download size={18} /></button>
+          <button ref={exportTriggerRef} type="button" data-tooltip="导出图片" aria-label="导出图片" aria-expanded={exportMenuOpen} onClick={() => {
+            setRatioMenuOpen(false)
+            setLayerContextMenu(null)
+            setExportMenuOpen((current) => !current)
+          }}><Download size={18} /></button>
           <button type="button" data-tooltip="保存编辑结果" aria-label="保存编辑结果" disabled={saving} onClick={() => openSaveDialog('save')}><Save size={17} /></button>
           <button type="button" data-tooltip="关闭图片编辑器" aria-label="关闭图片编辑器" onClick={requestClose}><X size={18} /></button>
         </div>
       </header>
 
       {exportMenuOpen && !transactionBusy && (
-        <div className="image-editor-export-menu" role="menu" aria-label="导出图片">
+        <div ref={exportMenuRef} className="image-editor-export-menu" role="menu" aria-label="导出图片">
           <button type="button" role="menuitem" disabled={Boolean(exportingFormat)} onClick={() => exportCanvas('png')}>PNG</button>
           <button type="button" role="menuitem" disabled={Boolean(exportingFormat)} onClick={() => exportCanvas('jpeg')}>JPG</button>
           <button type="button" role="menuitem" disabled={Boolean(exportingFormat)} onClick={() => exportCanvas('psd')}>{exportingFormat === 'psd' ? <><LoaderCircle className="image-editor-spin" size={15} /><ShinyText text="正在导出 PSD" speed={1.6} color="#bfc0c1" shineColor="#ffffff" spread={90} /></> : 'PSD'}</button>
@@ -4122,6 +4136,8 @@ export function ImageEditorWorkspace({
                 event.preventDefault()
                 finishLayerDrag()
                 selectLayer(layer.id)
+                setRatioMenuOpen(false)
+                setExportMenuOpen(false)
                 setLayerContextMenu({
                   layerId: layer.id,
                   x: Math.min(event.clientX, window.innerWidth - 196),
@@ -4148,6 +4164,7 @@ export function ImageEditorWorkspace({
 
       {layerContextMenu && (
         <div
+          ref={layerContextMenuRef}
           className="image-editor-layer-context-menu"
           role="menu"
           aria-label="图层操作"

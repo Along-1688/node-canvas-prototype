@@ -1,20 +1,44 @@
 import { defaultVideoGenerationParams } from './videoGeneration'
 import { imageMediaForVariant } from './mediaMetadata'
+import { DEFAULT_TEXT_MODEL_ID } from './textModelClient'
 import type { CanvasFlowEdge, CanvasFlowNode, CanvasNodeData, GenerationReferenceRole, ImageGenerationParams, MediaNodeType } from './types'
 
-export type StarterExampleId = 'text-to-video' | 'image-background' | 'first-frame-video' | 'audio-to-video'
+export type StarterExampleId = 'story-script' | 'image-background' | 'first-frame-video' | 'audio-to-video'
 
 export const starterExamples: Array<{
   id: StarterExampleId
   label: string
   sourceType: MediaNodeType
   targetType: MediaNodeType
+  iconType: MediaNodeType
+  artworkUrl: string
+  artworkPosition: string
 }> = [
-  { id: 'text-to-video', label: '文字生视频', sourceType: 'text', targetType: 'video' },
-  { id: 'image-background', label: '图片换背景', sourceType: 'image', targetType: 'image' },
-  { id: 'first-frame-video', label: '首帧生视频', sourceType: 'image', targetType: 'video' },
-  { id: 'audio-to-video', label: '音频生视频', sourceType: 'audio', targetType: 'video' },
+  { id: 'story-script', label: '故事脚本生成', sourceType: 'text', targetType: 'text', iconType: 'text', artworkUrl: '/node-canvas-prototype/assets/starter/text-to-video.jpg', artworkPosition: 'center 52%' },
+  { id: 'image-background', label: '图片换背景', sourceType: 'image', targetType: 'image', iconType: 'image', artworkUrl: '/node-canvas-prototype/assets/starter/image-background.jpg', artworkPosition: 'center top' },
+  { id: 'first-frame-video', label: '首帧图生视频', sourceType: 'image', targetType: 'video', iconType: 'video', artworkUrl: '/node-canvas-prototype/assets/starter/first-frame-video.jpg', artworkPosition: 'center 44%' },
+  { id: 'audio-to-video', label: '音频生视频', sourceType: 'audio', targetType: 'video', iconType: 'audio', artworkUrl: '/node-canvas-prototype/assets/starter/audio-to-video.jpg', artworkPosition: 'center top' },
 ]
+
+const storyDraft = `《带着 AI 重返 80 年代》第一集
+
+总时长：60 秒
+人物：林晓（现代青年）、青年母亲（1986 年）、AI（手环机械音）
+场景：80 年代红砖家属院，二八自行车、晾衣绳、老式收音机
+
+0-10s（10s）
+白光爆闪，林晓踉跄落地，手腕 AI 手环蓝光频闪，耳边是复古流行歌。林晓慌张张望：时空测试翻车了？AI：定位 1986 年，穿梭成功，信号不稳，部分功能受限。
+
+10-27s（17s，累计 27s）
+扎麻花辫、穿碎花衫的年轻母亲拎搪瓷脸盆路过，疑惑打量林晓。母亲：小姑娘，哪家的？从没见过你。林晓攥紧手环，声音发颤：我……迷路了。
+
+27-42s（15s，累计 42s）
+手环私自出声。AI：匹配成功，目标是你的生母，现年 20 岁。检测：三年后她将遭遇重大健康隐患。母亲好奇凑近，林晓慌忙捂住手环。
+
+42-53s（11s，累计 53s）
+林晓心绪大乱，指尖反复摩挲手环。林晓（内心呢喃）：原来隐患在这个时间点，我到底能不能提醒她？AI 弹出提示：干预过往会引发未知时空风险。`
+
+const portraitBackgroundPrompt = '黑西装黑衬衫墨镜男士，姿态不拘束，搭建全新户外或室内场景，时尚杂志人像布光，立体轮廓光，高清写实，构图舒展，画面干净富有高级感。'
 
 const imageGeneration: ImageGenerationParams = {
   ratio: '16:9',
@@ -46,11 +70,11 @@ function videoTargetData(title: string, prompt: string, modeId: 'first-frame' | 
 function imageTargetData(): CanvasNodeData {
   return {
     nodeType: 'image',
-    title: '海边咖啡馆背景',
+    title: '黑西装男士场景图',
     status: 'idle',
     sourceKind: 'created',
     content: '',
-    localPrompt: '保留人物和服装，将背景替换为清晨的海边咖啡馆，光线自然。',
+    localPrompt: portraitBackgroundPrompt,
     modeId: 'text-to-image',
     modelId: 'seedream-3',
     imageGeneration: structuredClone(imageGeneration),
@@ -66,23 +90,42 @@ export function buildStarterExample(exampleId: StarterExampleId, seed: string): 
   let target: CanvasFlowNode
   let inputRole: GenerationReferenceRole = 'default'
 
-  if (exampleId === 'text-to-video') {
+  if (exampleId === 'story-script') {
     source = {
       id: sourceId,
       type: 'text',
-      position: { x: 120, y: 220 },
-      style: { width: 290, height: 176 },
+      position: { x: 110, y: 170 },
+      style: { width: 320, height: 240 },
       data: {
         nodeType: 'text',
-        title: '雨夜骑行脚本',
+        title: '《带着 AI 重返 80 年代》',
         status: 'success',
         sourceKind: 'created',
-        content: '雨夜的城市街道，骑行者穿过霓虹和湿漉路面，镜头跟随车轮快速推进。',
+        content: storyDraft,
         backgroundColor: 'default',
         textFormat: { block: 'body', bold: false, italic: false },
       },
     }
-    target = { id: targetId, type: 'video', position: { x: 540, y: 180 }, selected: true, data: videoTargetData('雨夜骑行视频', '节奏逐渐加快，保留路面倒影与车灯轨迹。') }
+    target = {
+      id: targetId,
+      type: 'text',
+      position: { x: 570, y: 170 },
+      selected: true,
+      style: { width: 320, height: 240 },
+      data: {
+        nodeType: 'text',
+        title: '完整故事脚本',
+        status: 'idle',
+        sourceKind: 'created',
+        content: '',
+        localPrompt: '根据我上传的剧本生成一个完整的故事脚本',
+        modeId: 'generate-copy',
+        modelId: DEFAULT_TEXT_MODEL_ID,
+        cost: 1,
+        backgroundColor: 'default',
+        textFormat: { block: 'body', bold: false, italic: false },
+      },
+    }
   } else if (exampleId === 'image-background') {
     source = {
       id: sourceId,
@@ -90,12 +133,11 @@ export function buildStarterExample(exampleId: StarterExampleId, seed: string): 
       position: { x: 150, y: 170 },
       data: {
         nodeType: 'image',
-        title: '街拍人像',
+        title: '黑西装男士人像',
         status: 'success',
         sourceKind: 'asset',
-        content: '户外街拍人像',
-        mediaVariant: 'ip',
-        media: imageMediaForVariant('ip'),
+        content: '黑西装、黑衬衫与墨镜男士棚拍人像',
+        media: { url: '/node-canvas-prototype/assets/starter/image-background-source.jpg', mimeType: 'image/jpeg', width: 1280, height: 720 },
         starterReplaceable: true,
         favorite: false,
       },
@@ -118,8 +160,8 @@ export function buildStarterExample(exampleId: StarterExampleId, seed: string): 
         favorite: false,
       },
     }
-    target = { id: targetId, type: 'video', position: { x: 620, y: 150 }, selected: true, data: videoTargetData('樱花列车短片', '镜头缓慢向前，列车驶入站台，花瓣被气流卷起。') }
-    inputRole = 'first-frame'
+    target = { id: targetId, type: 'video', position: { x: 620, y: 150 }, selected: true, data: videoTargetData('首帧生成视频', '根据图片生成视频。', 'reference') }
+    inputRole = 'reference'
   } else {
     source = {
       id: sourceId,

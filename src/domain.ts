@@ -22,6 +22,11 @@ const contextSourceMatrix: Record<MediaNodeType, MediaNodeType[]> = {
   audio: ['text'],
 }
 
+function isImageEditorNode(node: CanvasFlowNode) {
+  return node.data.nodeType === 'image'
+    && (node.data.imageOperation?.operation === 'image-editor' || node.data.imageOperation?.operation === 'image-compose')
+}
+
 export function allowedTargetsForSource(sourceType: MediaNodeType) {
   return [...targetMatrix[sourceType]]
 }
@@ -31,6 +36,7 @@ export function isConnectionPairAllowed(sourceType: MediaNodeType, targetType: M
 }
 
 export function allowedContextSourcesForTarget(target: CanvasFlowNode) {
+  if (isImageEditorNode(target)) return []
   if (target.data.nodeType === 'image' && target.data.sourceKind === 'upload') return []
   return [...contextSourceMatrix[target.data.nodeType]]
 }
@@ -97,6 +103,9 @@ export function validateConnection(
   const targetNode = nodes.find((node) => node.id === target)
   if (!sourceNode || !targetNode) return { valid: false, reason: '未找到连接节点' }
 
+  if (isImageEditorNode(targetNode) && sourceNode.data.nodeType !== 'image') {
+    return { valid: false, reason: '图片编辑器仅支持图片节点输入' }
+  }
   if (!isConnectionPairAllowed(sourceNode.data.nodeType, targetNode.data.nodeType)) {
     return { valid: false, reason: `${labelForType(sourceNode.data.nodeType)}暂不能作为${labelForType(targetNode.data.nodeType)}的输入` }
   }
@@ -159,29 +168,25 @@ export function updateNodeData(
   )
 }
 
-export function markDownstreamNodesStale(
+export function markNodesStale(
   nodes: CanvasFlowNode[],
-  edges: CanvasFlowEdge[],
-  changedNodeIds: string[],
-  includeChangedNodes = false,
+  nodeIds: string[],
 ): CanvasFlowNode[] {
-  const affected = new Set(includeChangedNodes ? changedNodeIds : [])
-  const visited = new Set(changedNodeIds)
-  const queue = [...changedNodeIds]
-
-  while (queue.length) {
-    const sourceId = queue.shift()!
-    edges.filter((edge) => edge.source === sourceId).forEach((edge) => {
-      affected.add(edge.target)
-      if (!visited.has(edge.target)) {
-        visited.add(edge.target)
-        queue.push(edge.target)
-      }
-    })
-  }
-
+  const affected = new Set(nodeIds)
   return nodes.map((node): CanvasFlowNode => {
     if (!affected.has(node.id) || (node.data.status !== 'success' && node.data.status !== 'stale')) return node
     return { ...node, data: { ...node.data, status: 'stale' as const, staleNoticeDismissed: false } }
   })
+}
+
+export function markDirectDependentsStale(
+  nodes: CanvasFlowNode[],
+  edges: CanvasFlowEdge[],
+  changedNodeIds: string[],
+): CanvasFlowNode[] {
+  const changed = new Set(changedNodeIds)
+  const directDependentIds = edges
+    .filter((edge) => changed.has(edge.source))
+    .map((edge) => edge.target)
+  return markNodesStale(nodes, directDependentIds)
 }

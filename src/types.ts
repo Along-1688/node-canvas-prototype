@@ -449,12 +449,18 @@ export interface GenerationTask {
   modelLabel: string
   cost: number
   error?: string
+  /** Real provider task identifier, present only for locally connected model calls. */
+  providerTaskId?: number
+  /** Provider completion reason, for example `stop` or `length`. */
+  providerFinishReason?: string
   createdAt: string
 }
 
 export interface CanvasDocument {
   id: string
   name: string
+  createdAt?: number
+  updatedAt?: number
   nodes: CanvasFlowNode[]
   edges: CanvasFlowEdge[]
   tasks: GenerationTask[]

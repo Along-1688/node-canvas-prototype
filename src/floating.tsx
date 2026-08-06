@@ -1,6 +1,37 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type RefObject } from 'react'
 import { createPortal } from 'react-dom'
 
+interface DismissableLayerOptions {
+  open: boolean
+  onClose: () => void
+  boundaryRefs: ReadonlyArray<RefObject<HTMLElement | null>>
+}
+
+export function useDismissableLayer({ open, onClose, boundaryRefs }: DismissableLayerOptions) {
+  const onCloseRef = useRef(onClose)
+  const boundaryRefsRef = useRef(boundaryRefs)
+  onCloseRef.current = onClose
+  boundaryRefsRef.current = boundaryRefs
+
+  useEffect(() => {
+    if (!open) return
+    const closeOutside = (event: PointerEvent) => {
+      const target = event.target
+      if (target instanceof Node && boundaryRefsRef.current.some((ref) => ref.current?.contains(target))) return
+      onCloseRef.current()
+    }
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') onCloseRef.current()
+    }
+    document.addEventListener('pointerdown', closeOutside, true)
+    document.addEventListener('keydown', closeOnEscape)
+    return () => {
+      document.removeEventListener('pointerdown', closeOutside, true)
+      document.removeEventListener('keydown', closeOnEscape)
+    }
+  }, [open])
+}
+
 interface AnchoredPopoverProps {
   anchorRef: RefObject<HTMLElement | null>
   open: boolean
@@ -14,6 +45,8 @@ interface AnchoredPopoverProps {
 export function AnchoredPopover({ anchorRef, open, onClose, className = '', align = 'start', placement = 'auto', children }: AnchoredPopoverProps) {
   const menuRef = useRef<HTMLDivElement>(null)
   const [position, setPosition] = useState({ top: 0, left: 0, ready: false })
+
+  useDismissableLayer({ open, onClose, boundaryRefs: [anchorRef, menuRef] })
 
   const updatePosition = useCallback(() => {
     const anchor = anchorRef.current
@@ -38,24 +71,14 @@ export function AnchoredPopover({ anchorRef, open, onClose, className = '', alig
 
   useEffect(() => {
     if (!open) return
-    const closeOutside = (event: PointerEvent) => {
-      const target = event.target as Node
-      if (anchorRef.current?.contains(target) || menuRef.current?.contains(target)) return
-      onClose()
-    }
-    const closeOnEscape = (event: KeyboardEvent) => { if (event.key === 'Escape') onClose() }
     const reposition = () => updatePosition()
-    document.addEventListener('pointerdown', closeOutside, true)
-    document.addEventListener('keydown', closeOnEscape)
     window.addEventListener('resize', reposition)
     window.addEventListener('scroll', reposition, true)
     return () => {
-      document.removeEventListener('pointerdown', closeOutside, true)
-      document.removeEventListener('keydown', closeOnEscape)
       window.removeEventListener('resize', reposition)
       window.removeEventListener('scroll', reposition, true)
     }
-  }, [anchorRef, onClose, open, updatePosition])
+  }, [open, updatePosition])
 
   if (!open) return null
   return createPortal(

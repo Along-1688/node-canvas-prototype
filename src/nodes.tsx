@@ -41,6 +41,7 @@ import {
   Music2,
   Palette,
   Pause,
+  Pencil,
   Pipette,
   Pin,
   Play,
@@ -86,6 +87,8 @@ import {
 } from './imageOperations'
 import { generationDefinitions, videoModeOptions, videoModelCapabilities } from './mockData'
 import { fitMediaAspect, formatMediaResolution } from './mediaGeometry'
+import { parseTextContent } from './textContent'
+import { DEFAULT_TEXT_MODEL_ID } from './textModelClient'
 import {
   mediaFileExtension,
   resolveVideoGenerationParams,
@@ -118,8 +121,8 @@ import type {
 } from './types'
 
 const textBackgrounds = [
-  { value: 'default', label: '默认', color: '#242220' },
-  { value: 'paper', label: '白色', color: '#eeeae4' },
+  { value: 'default', label: '默认', color: '#242424' },
+  { value: 'paper', label: '白色', color: '#eeeeee' },
   { value: 'rose', label: '红色', color: '#713637' },
   { value: 'amber', label: '橙色', color: '#74431f' },
   { value: 'olive', label: '黄色', color: '#686027' },
@@ -267,7 +270,7 @@ function NodeHeader({ id, data, icon, draggable = false }: { id: string; data: C
           </div>
         </AnchoredPopover>
       </>}
-      {data.seedanceCompliance === 'checking' && <span className="node-compliance-checking" role="status"><LoaderCircle size={13} /><ShinyText text="正在验证" speed={1.6} color="#d7a25b" shineColor="#fff3df" spread={84} /></span>}
+      {data.seedanceCompliance === 'checking' && <span className="node-compliance-checking" role="status"><LoaderCircle size={13} /><ShinyText text="正在验证" speed={1.6} color="#d7d7d7" shineColor="#ffffff" spread={84} /></span>}
       {data.seedanceCompliance === 'approved' && <span className="node-compliance-approved nodrag" tabIndex={0} aria-label="素材已合规，可用于 Seedance 2.0 视频生产"><ShieldCheck size={15} /><span className="node-compliance-tooltip" role="tooltip">素材已合规，可用于 Seedance 2.0 视频生产</span></span>}
       {data.pinColor && <span className={`node-pin-dot pin-${data.pinColor}`} title={`${pinOptions.find((item) => item.value === data.pinColor)?.label ?? ''} Pin`} />}
       <InteractionCandidateBadge id={id} type={data.nodeType} />
@@ -276,7 +279,7 @@ function NodeHeader({ id, data, icon, draggable = false }: { id: string; data: C
   )
 }
 
-export function SmartPort({ nodeId, id, type, position, label }: { nodeId?: string; id: 'input' | 'output'; type: 'source' | 'target'; position: Position; label: string }) {
+export function SmartPort({ nodeId, id, type, position, label, launchesMenu = true }: { nodeId?: string; id: 'input' | 'output'; type: 'source' | 'target'; position: Position; label: string; launchesMenu?: boolean }) {
   const { openContinuation, openContextAdd } = useCanvasActions()
   const updateNodeInternals = useUpdateNodeInternals()
   const [offset, setOffset] = useState(70)
@@ -291,7 +294,7 @@ export function SmartPort({ nodeId, id, type, position, label }: { nodeId?: stri
     const x = clientX ?? rect.left + rect.width / 2
     const y = clientY ?? rect.top + rect.height / 2
     if (type === 'source') openContinuation(resolvedNodeId, x, y)
-    else openContextAdd(resolvedNodeId, x, y)
+    else if (launchesMenu) openContextAdd(resolvedNodeId, x, y)
   }
   return (
     <>
@@ -303,14 +306,14 @@ export function SmartPort({ nodeId, id, type, position, label }: { nodeId?: stri
           setOffset(Math.min(Math.max(event.clientY - rect.top, 27), rect.height - 27))
         }}
       >
-        <Handle id={`${id}-launcher`} type={type} position={position} className="port-launcher nodrag" style={{ top: offset }} aria-label={label} tabIndex={0} onKeyDown={(event) => {
+        <Handle id={`${id}-launcher`} type={type} position={position} className="port-launcher nodrag" style={{ top: offset }} aria-label={label} tabIndex={launchesMenu ? 0 : -1} onKeyDown={launchesMenu ? (event) => {
           if (event.key !== 'Enter' && event.key !== ' ') return
           event.preventDefault()
           event.stopPropagation()
           openFromLauncher(event.currentTarget)
-        }} onClick={(event) => {
+        } : undefined} onClick={(event) => {
           event.stopPropagation()
-          openFromLauncher(event.currentTarget, event.clientX, event.clientY)
+          if (launchesMenu) openFromLauncher(event.currentTarget, event.clientX, event.clientY)
         }}>
           <Plus size={13} strokeWidth={2.2} />
         </Handle>
@@ -319,10 +322,10 @@ export function SmartPort({ nodeId, id, type, position, label }: { nodeId?: stri
   )
 }
 
-function ConnectionHandles({ nodeId, source = true, target = true }: { nodeId?: string; source?: boolean; target?: boolean }) {
+function ConnectionHandles({ nodeId, source = true, target = true, targetLaunchesMenu = true }: { nodeId?: string; source?: boolean; target?: boolean; targetLaunchesMenu?: boolean }) {
   return (
     <>
-      {target && <SmartPort nodeId={nodeId} id="input" type="target" position={Position.Left} label="添加上下文" />}
+      {target && <SmartPort nodeId={nodeId} id="input" type="target" position={Position.Left} label={targetLaunchesMenu ? '添加上下文' : '图片输入端口，仅支持从图片节点输出端连接'} launchesMenu={targetLaunchesMenu} />}
       {source && <SmartPort nodeId={nodeId} id="output" type="source" position={Position.Right} label="引用该节点生成" />}
     </>
   )
@@ -721,12 +724,27 @@ function PreviewMetadata({ data, onClose }: { data: CanvasNodeData; onClose: () 
 export function PreviewOverlay({ open, onClose, id, data }: { open: boolean; onClose: () => void; id: string; data: CanvasNodeData }) {
   const { updateNode } = useCanvasActions()
   const format = data.textFormat ?? { block: 'body', bold: false, italic: false }
+  const [textDraft, setTextDraft] = useState(data.content ?? '')
+  const [textEditing, setTextEditing] = useState(false)
+  const composingTextRef = useRef(false)
+  const commitText = useCallback((content: string) => {
+    updateNode(id, { content, status: content.trim() ? 'ready' : 'idle' })
+  }, [id, updateNode])
+
+  useEffect(() => {
+    if (!composingTextRef.current) setTextDraft(data.content ?? '')
+  }, [data.content])
+
   useEffect(() => {
     if (!open) return
     const closeOnEscape = (event: KeyboardEvent) => { if (event.key === 'Escape') onClose() }
     window.addEventListener('keydown', closeOnEscape)
     return () => window.removeEventListener('keydown', closeOnEscape)
   }, [onClose, open])
+
+  useEffect(() => {
+    if (!open) setTextEditing(false)
+  }, [open])
 
   if (!open) return null
   const isMediaPreview = data.nodeType === 'image' || data.nodeType === 'video'
@@ -735,7 +753,14 @@ export function PreviewOverlay({ open, onClose, id, data }: { open: boolean; onC
       <section className={`node-preview-panel preview-${data.nodeType} ${data.nodeType === 'text' ? 'fullscreen-text-editor' : ''}`} onMouseDown={(event) => event.stopPropagation()}>
         {!isMediaPreview && data.nodeType !== 'text' && <header><strong>{data.title}</strong><button type="button" autoFocus onClick={onClose} aria-label="关闭全屏预览"><X size={19} /></button></header>}
         {data.nodeType === 'text' ? (
-          <><TextToolbar id={id} data={data} variant="fullscreen" onClose={onClose} /><textarea className={`fullscreen-text text-bg-${data.backgroundColor ?? 'default'} text-block-${format.block} ${format.bold ? 'is-bold' : ''} ${format.italic ? 'is-italic' : ''}`} aria-label="全屏编辑文本" value={data.content ?? ''} placeholder="输入文本内容" onChange={(event) => updateNode(id, { content: event.target.value, status: event.target.value.trim() ? 'ready' : 'idle' })} /></>
+          <>
+            <TextToolbar id={id} data={data} variant="fullscreen" onClose={onClose} onToggleTextEditing={() => setTextEditing((current) => !current)} textEditing={textEditing} />
+            {textEditing
+              ? <textarea autoFocus className={`fullscreen-text text-bg-${data.backgroundColor ?? 'default'} text-block-${format.block} ${format.bold ? 'is-bold' : ''} ${format.italic ? 'is-italic' : ''}`} aria-label="全屏编辑文本" value={textDraft} placeholder="输入文本内容" onCompositionStart={() => { composingTextRef.current = true }} onCompositionEnd={(event) => { composingTextRef.current = false; const content = event.currentTarget.value; setTextDraft(content); commitText(content) }} onChange={(event) => { const content = event.target.value; setTextDraft(content); if (!composingTextRef.current && !(event.nativeEvent as InputEvent).isComposing) commitText(content) }} onBlur={() => { if (!composingTextRef.current && textDraft !== (data.content ?? '')) commitText(textDraft) }} />
+              : <div className={`fullscreen-text fullscreen-text-viewer text-bg-${data.backgroundColor ?? 'default'} text-block-${format.block} ${format.bold ? 'is-bold' : ''} ${format.italic ? 'is-italic' : ''}`} role="textbox" aria-readonly="true" aria-label="全屏文本内容，选择编辑文本可修改" tabIndex={0} onDoubleClick={() => setTextEditing(true)} onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); setTextEditing(true) } }}>
+                {textDraft ? <TextContentRenderer content={textDraft} /> : <span className="text-node-placeholder">选择编辑文本以输入内容</span>}
+              </div>}
+          </>
         ) : data.nodeType === 'audio' ? (
           <div className="fullscreen-audio"><Waves size={46} /><strong>{data.content}</strong><span>音频预览</span></div>
         ) : <>
@@ -752,7 +777,7 @@ export function PreviewOverlay({ open, onClose, id, data }: { open: boolean; onC
   )
 }
 
-function TextToolbar({ id, data, onExpand, onClose, variant = 'node' }: { id: string; data: CanvasNodeData; onExpand?: () => void; onClose?: () => void; variant?: 'node' | 'fullscreen' }) {
+function TextToolbar({ id, data, onExpand, onClose, onToggleTextEditing, textEditing = false, variant = 'node' }: { id: string; data: CanvasNodeData; onExpand?: () => void; onClose?: () => void; onToggleTextEditing?: () => void; textEditing?: boolean; variant?: 'node' | 'fullscreen' }) {
   const { updateNode, notify } = useCanvasActions()
   const [paletteOpen, setPaletteOpen] = useState(false)
   const [listOpen, setListOpen] = useState(false)
@@ -781,6 +806,7 @@ function TextToolbar({ id, data, onExpand, onClose, variant = 'node' }: { id: st
       <div className="list-control"><IconAction label="项目符号列表" onClick={() => applyList(false)}><List size={15} /></IconAction><button ref={listButtonRef} type="button" className="list-chevron nodrag" aria-label="选择列表类型" title="选择列表类型" onClick={() => setListOpen((current) => !current)}><ChevronDown size={12} /></button><AnchoredPopover anchorRef={listButtonRef} open={listOpen} onClose={() => setListOpen(false)} className="toolbar-menu list-format-menu" align="start"><div role="menu"><button type="button" onClick={() => { applyList(false); setListOpen(false) }}><List size={14} />项目符号</button><button type="button" onClick={() => { applyList(true); setListOpen(false) }}><span className="numbered-list-icon">1.</span>编号列表</button><button type="button" onClick={() => { clearList(); setListOpen(false) }}><X size={14} />清除列表格式</button></div></AnchoredPopover></div>
       <span className="toolbar-divider" />
       <PinControl id={id} value={data.pinColor} />
+      {variant === 'fullscreen' && onToggleTextEditing && <IconAction label={textEditing ? '完成编辑' : '编辑文本'} active={textEditing} onClick={onToggleTextEditing}>{textEditing ? <Check size={15} /> : <Pencil size={15} />}</IconAction>}
       <IconAction label="复制文本" onClick={async () => {
         const text = data.content ?? ''
         try {
@@ -807,27 +833,81 @@ function TextToolbar({ id, data, onExpand, onClose, variant = 'node' }: { id: st
   )
 }
 
-function TextGenerationConfig({ id, data }: { id: string; data: CanvasNodeData }) {
+export function TextGenerationConfig({ id, data }: { id: string; data: CanvasNodeData }) {
   const { updateNode, runGeneration, notify, beginReferenceSelection } = useCanvasActions()
   const definition = generationDefinitions.find((item) => item.nodeType === 'text')!
   const mode = definition.modes.find((item) => item.id === data.modeId) ?? definition.modes[0]
-  const model = mode.models.find((item) => item.id === data.modelId) ?? mode.models[0]
+  const model = mode.models.find((item) => item.id === data.modelId)
+    ?? mode.models.find((item) => item.id === DEFAULT_TEXT_MODEL_ID)
+    ?? mode.models[0]
+  const [promptDraft, setPromptDraft] = useState(data.localPrompt ?? '')
+  const composingPromptRef = useRef(false)
   const busy = data.status === 'queued' || data.status === 'running'
+
+  useEffect(() => {
+    if (!composingPromptRef.current) setPromptDraft(data.localPrompt ?? '')
+  }, [data.localPrompt])
+
+  const commitPrompt = useCallback((localPrompt: string) => {
+    updateNode(id, { localPrompt, modeId: mode.id, modelId: model.id })
+  }, [id, mode.id, model.id, updateNode])
 
   return (
     <section className="text-generation-config node-panel zoom-stable-ui nodrag nowheel" aria-label="文本生成配置">
       <ReferenceStrip targetId={id} references={data.references} onAdd={() => beginReferenceSelection(id)} />
       <div className="text-prompt-row">
-        <textarea aria-label="文本生成提示词" placeholder="描述你想生成的文本内容" value={data.localPrompt ?? ''} onChange={(event) => updateNode(id, { localPrompt: event.target.value, modeId: mode.id, modelId: model.id })} />
+        <textarea
+          aria-label="文本生成提示词"
+          placeholder="描述你想生成的文本内容"
+          value={promptDraft}
+          onCompositionStart={() => { composingPromptRef.current = true }}
+          onCompositionEnd={(event) => {
+            composingPromptRef.current = false
+            const localPrompt = event.currentTarget.value
+            setPromptDraft(localPrompt)
+            commitPrompt(localPrompt)
+          }}
+          onChange={(event) => {
+            const localPrompt = event.target.value
+            setPromptDraft(localPrompt)
+            if (!composingPromptRef.current && !(event.nativeEvent as InputEvent).isComposing) commitPrompt(localPrompt)
+          }}
+          onBlur={() => {
+            if (!composingPromptRef.current && promptDraft !== (data.localPrompt ?? '')) commitPrompt(promptDraft)
+          }}
+        />
       </div>
       <footer>
-        <select aria-label="文本生成模型" value={model.id} onChange={(event) => updateNode(id, { modelId: event.target.value })}>{mode.models.map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}</select>
+        <select aria-label="文本生成模型" value={model.id} onChange={(event) => updateNode(id, { localPrompt: promptDraft, modeId: mode.id, modelId: event.target.value })}>{mode.models.map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}</select>
         <span className="panel-spacer" />
         <button type="button" className="translate-text-action" onClick={() => notify('已翻译提示词（Mock）')} title="翻译提示词" aria-label="翻译提示词"><Languages size={15} /></button>
         <span className="generation-cost"><span className="chestnut-dot" />{data.cost ?? 1}</span>
-        <button type="button" className="generate-button" onClick={() => runGeneration(id)} disabled={busy || (!(data.localPrompt ?? '').trim() && !(data.references?.length))} aria-label={busy ? '文本生成中' : '生成文本'}>{busy ? <Pause size={16} /> : <ArrowUp size={17} />}</button>
+        <button type="button" className="generate-button" onClick={() => runGeneration(id)} disabled={busy || (!promptDraft.trim() && !(data.references?.length))} aria-label={busy ? '文本生成中' : '生成文本'}>{busy ? <Pause size={16} /> : <ArrowUp size={17} />}</button>
       </footer>
     </section>
+  )
+}
+
+function TextContentRenderer({ content }: { content: string }) {
+  return parseTextContent(content).map((block, index) => block.kind === 'code'
+    ? <pre key={`${block.language ?? 'plain'}-${index}`} className="text-code-block" data-language={block.language}><code>{block.content}</code></pre>
+    : <span key={`text-${index}`} className="text-content-paragraph">{block.content}</span>)
+}
+
+export function TextNodeContent({ className, content, busy, onDoubleClick }: { className: string; content: string; busy: boolean; onDoubleClick?: () => void }) {
+  if (busy) {
+    return (
+      <div className={`${className} text-node-loading`} role="status" aria-live="polite" aria-label="文本生成中">
+        <LoaderCircle className="text-node-loading-spinner" size={19} aria-hidden="true" />
+        <span className="text-node-loading-copy"><strong><ShinyText text="thinking..." speed={1.2} color="#949494" shineColor="#ffffff" spread={104} /></strong></span>
+      </div>
+    )
+  }
+
+  return (
+    <div className={`${className} text-node-browser nowheel`} role="textbox" aria-readonly="true" aria-label="文本节点内容，双击编辑" onDoubleClick={(event) => { event.stopPropagation(); onDoubleClick?.() }}>
+      {content ? <TextContentRenderer content={content} /> : <span className="text-node-placeholder">双击输入文本内容</span>}
+    </div>
   )
 }
 
@@ -842,6 +922,7 @@ export const TextNode = memo(function TextNode({ id, data, selected }: NodeProps
   const candidate = isConnectionTargetCandidate(id)
   const interactionClass = interactionNodeClass(id, interactionMode, isInteractionCandidate(id))
   const editorClass = `text-node-editor text-block-${format.block} ${format.bold ? 'is-bold' : ''} ${format.italic ? 'is-italic' : ''}`
+  const busy = data.status === 'queued' || data.status === 'running'
 
   useEffect(() => { if (!focused) setEditing(false) }, [focused])
 
@@ -852,7 +933,7 @@ export const TextNode = memo(function TextNode({ id, data, selected }: NodeProps
       {focused && Boolean(content.trim()) && <TextToolbar id={id} data={data} onExpand={() => setPreviewOpen(true)} />}
       <NodeHeader id={id} data={data} icon={<span className="text-node-icon">T</span>} />
       <div className={`node-surface text-surface text-bg-${data.backgroundColor ?? 'default'}`}>
-        {editing ? <textarea autoFocus className={`${editorClass} nodrag nowheel is-editing`} aria-label="文本节点内容" placeholder="输入文本内容" value={content} onChange={(event) => updateNode(id, { content: event.target.value, status: event.target.value.trim() ? 'ready' : 'idle' })} onBlur={() => setEditing(false)} onKeyDown={(event) => { if (event.key === 'Escape') { event.preventDefault(); event.currentTarget.blur() } }} /> : <div className={`${editorClass} text-node-browser`} role="textbox" aria-readonly="true" aria-label="文本节点内容，双击编辑" onDoubleClick={(event) => { event.stopPropagation(); setEditing(true) }}>{content || <span className="text-node-placeholder">双击输入文本内容</span>}</div>}
+        {editing ? <textarea autoFocus className={`${editorClass} nodrag nowheel is-editing`} aria-label="文本节点内容" placeholder="输入文本内容" value={content} onChange={(event) => updateNode(id, { content: event.target.value, status: event.target.value.trim() ? 'ready' : 'idle' })} onBlur={() => setEditing(false)} onKeyDown={(event) => { if (event.key === 'Escape') { event.preventDefault(); event.currentTarget.blur() } }} /> : <TextNodeContent className={editorClass} content={content} busy={busy} onDoubleClick={() => setEditing(true)} />}
       </div>
       {focused && <TextGenerationConfig id={id} data={data} />}
       <PreviewOverlay open={previewOpen} onClose={() => setPreviewOpen(false)} id={id} data={data} />
@@ -1741,7 +1822,7 @@ export function MediaErrorState({ error, onRetry }: { error?: string; onRetry: (
 function MediaGenerationProgress({ progress }: { progress?: number }) {
   const value = Math.min(99, Math.max(2, Math.round(progress ?? 2)))
   return <div className="media-generation-progress" role="status" aria-label={`生成中 ${value}%`}>
-    <strong><ShinyText text={`生成中 ${value}%`} speed={1.7} color="#c7c1ba" shineColor="#ffffff" spread={96} /></strong>
+    <strong><ShinyText text={`生成中 ${value}%`} speed={1.2} color="#949494" shineColor="#ffffff" spread={104} /></strong>
   </div>
 }
 
@@ -1802,7 +1883,7 @@ export const ImageNode = memo(function ImageNode({ id, data, selected }: NodePro
   if (isInitialImageEditor) {
     return (
       <article ref={nodeRef} className={`canvas-node image-node image-editor-node ${selected ? 'is-selected' : ''} ${candidate ? 'is-connection-candidate' : ''} ${interactionClass}`} style={overlayVariables}>
-        <ConnectionHandles nodeId={id} source={false} />
+        <ConnectionHandles nodeId={id} targetLaunchesMenu={false} />
         <NodeHeader id={id} data={data} icon={<ImageIcon size={13} />} />
         <div className="node-surface image-surface image-editor-node-surface">
           <div className="image-editor-node-empty">

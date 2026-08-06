@@ -22,7 +22,6 @@ import {
 } from '@xyflow/react'
 import {
   AlignHorizontalSpaceAround,
-  ArrowRight,
   Box,
   Check,
   ChevronDown,
@@ -39,6 +38,7 @@ import {
   Hand,
   Keyboard,
   Layers3,
+  List,
   Link2,
   Map as MapIcon,
   Maximize2,
@@ -49,6 +49,7 @@ import {
   Play,
   Plus,
   Scissors,
+  Search,
   Share2,
   ShieldCheck,
   Sparkles,
@@ -64,11 +65,12 @@ import { buildStarterExample, starterExamples, type StarterExampleId } from './c
 import { cloneCanvasSnapshot, restoreCanvasSnapshot, type CanvasSnapshot } from './canvasHistory'
 import { CanvasActionContext, type CanvasInteractionMode } from './canvasContext'
 import { areCanvasShortcutsIsolated, isCanvasDeleteShortcutTargetEditing, isCanvasShortcutTargetInteractive, isPlaylistDeleteShortcutTarget } from './canvasShortcuts'
-import { allowedContextSourcesForTarget, allowedTargetsForSource, attachCanvasEdgesToBorders, isConnectionPairAllowed, isSeedanceComplianceEligible, markDownstreamNodesStale, resolveEffectivePrompt, resolveMockPromptMarkerLabel, syncTargetReferences, updateNodeData, validateConnection } from './domain'
+import { allowedContextSourcesForTarget, allowedTargetsForSource, attachCanvasEdgesToBorders, isConnectionPairAllowed, isSeedanceComplianceEligible, markDirectDependentsStale, markNodesStale, resolveEffectivePrompt, resolveMockPromptMarkerLabel, syncTargetReferences, updateNodeData, validateConnection } from './domain'
 import { edgeTypes } from './edges'
-import { AnchoredPopover } from './floating'
+import { AnchoredPopover, useDismissableLayer } from './floating'
 import { ImageEditorWorkspace } from './imageEditor'
 import { generationDefinitions, initialEdges, initialNodes, initialTasks } from './mockData'
+import { PUBLIC_TEXT_MODEL_MOCK_ID, isTextModelId, requestTextModelCompletion, textModelLabel, TextModelRequestError } from './textModelClient'
 import {
   buildGridSlices,
   buildPendingImageEditorData,
@@ -152,6 +154,7 @@ import {
   saveCanvasShareSnapshot,
   type SharedCanvasLoadResult,
 } from './canvasSharing'
+import { canvasProjectActiveCanvas, createCanvasProject, updateProjectCanvases, type CanvasProject } from './canvasProjects'
 import type {
   AlignmentGuide,
   AudioOperationResult,
@@ -208,6 +211,7 @@ interface NodeDragState {
 }
 
 const DEFAULT_VIEWPORT: Viewport = { x: 0, y: 0, zoom: 0.88 }
+const EMPTY_CANVAS: CanvasDocument = { id: '', name: '', nodes: [], edges: [], tasks: [], groups: [], playlists: [], viewport: DEFAULT_VIEWPORT }
 
 const DEFAULT_IMAGE_GENERATION: ImageGenerationParams = {
   ratio: '16:9',
@@ -373,7 +377,7 @@ function buildCanvasNode(
     mediaVariant: source === 'virtual-ip' ? 'ip' : type === 'image' ? 'dog' : type === 'audio' ? 'audio' : 'anime',
     localPrompt: created ? '' : undefined,
     modeId: type === 'video' ? 'reference' : type === 'text' ? 'generate-copy' : type === 'image' ? 'text-to-image' : type === 'audio' ? 'audio-generate' : undefined,
-    modelId: type === 'video' ? 'kling-o1' : type === 'text' ? 'gemini-flash-lite' : type === 'image' ? 'seedream-3' : type === 'audio' ? 'seed-audio-1' : undefined,
+    modelId: type === 'video' ? 'kling-o1' : type === 'text' ? PUBLIC_TEXT_MODEL_MOCK_ID : type === 'image' ? 'seedream-3' : type === 'audio' ? 'seed-audio-1' : undefined,
     params: type === 'video' ? { ...defaultVideoGenerationParams() } : type === 'audio' ? { speed: 1, voiceId: 'elegant-senior', voiceLabel: '淡雅学姐' } : undefined,
     imageGeneration: type === 'image' ? structuredClone(DEFAULT_IMAGE_GENERATION) : undefined,
     cost: type === 'video' ? 35 : type === 'text' ? 1 : type === 'audio' ? 12 : type === 'image' ? 18 : undefined,
@@ -876,12 +880,15 @@ export function PlaylistFrame({
   const [draggingClipId, setDraggingClipId] = useState<string | null>(null)
   const [reorderInsertionIndex, setReorderInsertionIndex] = useState<number | null>(null)
   const timelineTrackRef = useRef<HTMLDivElement>(null)
+  const downloadMenuRef = useRef<HTMLDetailsElement>(null)
+  const [downloadMenuOpen, setDownloadMenuOpen] = useState(false)
   const dragRef = useRef<{ x: number; y: number } | null>(null)
   const dragCleanupRef = useRef<(() => void) | null>(null)
   const resizeRef = useRef<{ x: number; width: number } | null>(null)
   const resizeCleanupRef = useRef<(() => void) | null>(null)
   const resizeMovedRef = useRef(false)
   const currentWidth = playlistWidth(playlist)
+  useDismissableLayer({ open: downloadMenuOpen, onClose: () => setDownloadMenuOpen(false), boundaryRefs: [downloadMenuRef] })
   useEffect(() => () => dragCleanupRef.current?.(), [])
   useEffect(() => () => resizeCleanupRef.current?.(), [])
   const beginMove = (event: React.PointerEvent<HTMLElement>) => {
@@ -977,7 +984,7 @@ export function PlaylistFrame({
     <div className={`playlist-editor ${selected && active ? 'has-actions' : 'is-compact'}`}>
       {selected && active && <aside>
         <button type="button" disabled={!canSplit} onClick={() => canSplit && lockedSplitTime !== undefined && onSplit(active.clip.id, lockedSplitTime)} aria-label="切割片段" title={canSplit ? `在 ${lockedSplitTime!.toFixed(1)} 秒处切割` : '先在时间线上点击锁定切割点'}><Scissors size={17} /></button>
-        <details className="playlist-download-menu">
+        <details ref={downloadMenuRef} className="playlist-download-menu" open={downloadMenuOpen} onToggle={(event) => setDownloadMenuOpen(event.currentTarget.open)}>
           <summary aria-label="打开播放列表下载菜单" title="下载"><Download size={17} /></summary>
           <div className="playlist-download-options" role="menu" aria-label="播放列表下载">
             <a href={activeMediaUrl} download role="menuitem">下载原始片段 (mp4)</a>
@@ -1084,9 +1091,12 @@ export function PlaylistFrame({
 }
 
 function initialCanvas(): CanvasDocument {
+  const now = Date.now()
   return {
     id: 'canvas-1',
     name: '画布 1',
+    createdAt: now - 8 * 60_000,
+    updatedAt: now - 8 * 60_000,
     nodes: syncTargetReferences(structuredClone(initialNodes), structuredClone(initialEdges)),
     edges: structuredClone(initialEdges),
     tasks: structuredClone(initialTasks),
@@ -1109,22 +1119,273 @@ function initialWorkspace() {
       url.searchParams.delete('canvasSnapshot')
       window.history.replaceState({}, '', `${url.pathname}${url.search}${url.hash}`)
       if (parsed && parsed.id && Array.isArray(parsed.nodes) && Array.isArray(parsed.edges)) {
-        return { canvases: [{ ...parsed, edges: attachCanvasEdgesToBorders(parsed.edges), groups: parsed.groups ?? [], playlists: parsed.playlists ?? [] }], activeCanvasId: parsed.id }
+        const now = Date.now()
+        const canvas = {
+          ...parsed,
+          createdAt: parsed.createdAt ?? now,
+          updatedAt: parsed.updatedAt ?? parsed.createdAt ?? now,
+          edges: attachCanvasEdgesToBorders(parsed.edges),
+          groups: parsed.groups ?? [],
+          playlists: parsed.playlists ?? [],
+        }
+        const project = createCanvasProject('project-shared', canvas.name || '独立画布', canvas, canvas.createdAt)
+        return {
+          projects: [project],
+          activeProjectId: project.id,
+          openInCanvas: true,
+        }
       }
     } catch {
       window.localStorage.removeItem(`${CANVAS_HANDOFF_PREFIX}${token}`)
     }
   }
   const canvas = initialCanvas()
-  return { canvases: [canvas], activeCanvasId: canvas.id }
+  const project = createCanvasProject('project-1', '产品宣传片', canvas, canvas.createdAt)
+  return { projects: [project], activeProjectId: project.id, openInCanvas: false }
+}
+
+function canvasCoverSource(canvas: CanvasDocument) {
+  for (const node of canvas.nodes) {
+    if (node.data.media?.posterUrl) return node.data.media.posterUrl
+    if (node.data.nodeType === 'image') {
+      if (node.data.media?.url) return node.data.media.url
+      const fallback = imageMediaForVariant(node.data.mediaVariant)
+      if (fallback?.url) return fallback.url
+    }
+  }
+  return undefined
+}
+
+function formatCanvasUpdatedAt(timestamp: number | undefined, now = Date.now()) {
+  if (!timestamp) return '编辑于 刚刚'
+  const elapsed = Math.max(0, now - timestamp)
+  const minutes = Math.floor(elapsed / 60_000)
+  if (minutes < 1) return '编辑于 刚刚'
+  if (minutes < 60) return `编辑于 ${minutes} 分钟前`
+  const hours = Math.floor(minutes / 60)
+  if (hours < 24) return `编辑于 ${hours} 小时前`
+  const date = new Date(timestamp)
+  const yesterday = new Date(now)
+  yesterday.setDate(yesterday.getDate() - 1)
+  if (date.toDateString() === yesterday.toDateString()) return '编辑于 昨天'
+  return `编辑于 ${date.getMonth() + 1} 月 ${date.getDate()} 日`
+}
+
+function formatCanvasCreatedAt(timestamp: number | undefined) {
+  if (!timestamp) return '--'
+  const date = new Date(timestamp)
+  const month = String(date.getMonth() + 1).padStart(2, '0')
+  const day = String(date.getDate()).padStart(2, '0')
+  return `${date.getFullYear()}.${month}.${day}`
+}
+
+function CanvasCardCover({ project }: { project: CanvasProject }) {
+  const canvas = canvasProjectActiveCanvas(project)
+  if (!canvas) return <div className="canvas-card-placeholder" aria-hidden="true" />
+  const src = canvasCoverSource(canvas)
+  if (src) return <img src={src} alt="" />
+  return <div className="canvas-card-placeholder" aria-hidden="true" />
+}
+
+interface CanvasHomeProps {
+  projects: CanvasProject[]
+  onCreate: () => void
+  onOpen: (projectId: string) => void
+  onRename: (projectId: string, name: string) => void
+  onDelete: (projectIds: string[]) => void
+}
+
+interface CanvasHomeSpace {
+  id: string
+  name: string
+  meta: string
+  avatar: string
+  tone: 'personal' | 'orange' | 'violet' | 'blue' | 'green'
+}
+
+const canvasHomeSpaces: CanvasHomeSpace[] = [
+  { id: 'personal', name: '我的个人空间', meta: '仅自己可见', avatar: '我', tone: 'personal' },
+  { id: 'happy-sunshine', name: '快乐阳光', meta: '普通成员 · 智能研究中心', avatar: '快', tone: 'orange' },
+  { id: '9527', name: '9527', meta: '所有者 · 1 人', avatar: '9', tone: 'violet' },
+  { id: 'eleven', name: '11', meta: '所有者 · 未设置部门', avatar: '1', tone: 'blue' },
+  { id: 'ai-native', name: 'ai_native', meta: '普通成员 · 未设置部门', avatar: 'AI', tone: 'green' },
+]
+
+export function CanvasHome({ projects, onCreate, onOpen, onRename, onDelete }: CanvasHomeProps) {
+  const [query, setQuery] = useState('')
+  const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid')
+  const [activeSpaceId, setActiveSpaceId] = useState('personal')
+  const [spaceSwitcherOpen, setSpaceSwitcherOpen] = useState(false)
+  const [menuProjectId, setMenuProjectId] = useState<string | null>(null)
+  const [selectionMode, setSelectionMode] = useState(false)
+  const [selectedProjectIds, setSelectedProjectIds] = useState<string[]>([])
+  const [renameProjectId, setRenameProjectId] = useState<string | null>(null)
+  const [renameDraft, setRenameDraft] = useState('')
+  const [pendingDeleteIds, setPendingDeleteIds] = useState<string[]>([])
+  const spaceTriggerRef = useRef<HTMLButtonElement>(null)
+  const activeProjectMenuTriggerRef = useRef<HTMLButtonElement>(null)
+  const activeProjectMenuRef = useRef<HTMLDivElement>(null)
+  const activeSpace = canvasHomeSpaces.find((space) => space.id === activeSpaceId) ?? canvasHomeSpaces[0]
+  const canvasHomeTitle = '我的画布'
+  const normalizedQuery = query.trim().toLocaleLowerCase()
+  const visibleProjects = useMemo(() => projects.filter((project) => project.name.toLocaleLowerCase().includes(normalizedQuery)), [projects, normalizedQuery])
+  const selectedSet = useMemo(() => new Set(selectedProjectIds), [selectedProjectIds])
+
+  useDismissableLayer({ open: Boolean(menuProjectId), onClose: () => setMenuProjectId(null), boundaryRefs: [activeProjectMenuTriggerRef, activeProjectMenuRef] })
+
+  useEffect(() => {
+    const availableIds = new Set(projects.map((project) => project.id))
+    setSelectedProjectIds((current) => current.filter((id) => availableIds.has(id)))
+  }, [projects])
+
+  const toggleProjectSelection = (projectId: string) => {
+    setSelectedProjectIds((current) => current.includes(projectId)
+      ? current.filter((id) => id !== projectId)
+      : [...current, projectId])
+  }
+
+  const enterSelectionMode = (projectId: string) => {
+    setMenuProjectId(null)
+    setSelectionMode(true)
+    setSelectedProjectIds((current) => current.includes(projectId) ? current : [...current, projectId])
+  }
+
+  const exitSelectionMode = () => {
+    setSelectionMode(false)
+    setSelectedProjectIds([])
+  }
+
+  const startRename = (project: CanvasProject) => {
+    setMenuProjectId(null)
+    setRenameProjectId(project.id)
+    setRenameDraft(project.name)
+  }
+
+  const cancelRename = () => {
+    setRenameProjectId(null)
+    setRenameDraft('')
+  }
+
+  const confirmRename = () => {
+    if (!renameProjectId) return
+    const name = renameDraft.trim()
+    if (name) onRename(renameProjectId, name)
+    cancelRename()
+  }
+
+  const confirmDelete = () => {
+    if (!pendingDeleteIds.length) return
+    onDelete(pendingDeleteIds)
+    if (pendingDeleteIds.some((id) => selectedSet.has(id))) exitSelectionMode()
+    setPendingDeleteIds([])
+  }
+
+  const selectSpace = (spaceId: string) => {
+    setActiveSpaceId(spaceId)
+    setSpaceSwitcherOpen(false)
+    setMenuProjectId(null)
+    exitSelectionMode()
+    setQuery('')
+  }
+
+  return <main className="canvas-home">
+    <header className="canvas-home-topbar">
+      <div className="canvas-home-brand" aria-label="节点式画布"><span>节点</span><span>灵创</span></div>
+      <div className="canvas-home-account">
+        <button ref={spaceTriggerRef} type="button" className="canvas-space-trigger" onClick={() => setSpaceSwitcherOpen((open) => !open)} aria-label={`切换空间，当前${activeSpace.name}`} aria-haspopup="menu" aria-expanded={spaceSwitcherOpen}>
+          <span className={`canvas-space-avatar is-${activeSpace.tone}`}>{activeSpace.avatar}</span>
+          <span className="canvas-space-trigger-label">{activeSpace.name}</span>
+          <ChevronDown className="canvas-space-chevron" size={14} aria-hidden="true" />
+        </button>
+        <AnchoredPopover anchorRef={spaceTriggerRef} open={spaceSwitcherOpen} onClose={() => setSpaceSwitcherOpen(false)} className="canvas-space-popover" align="end">
+          <section aria-label="空间身份">
+            <header className="canvas-space-profile">
+              <span className="canvas-space-profile-avatar">吴</span>
+              <span><strong>吴泽龙</strong><small>188****8152</small></span>
+            </header>
+            <div className="canvas-space-section-title"><span>我的空间</span><i>{canvasHomeSpaces.length}</i></div>
+            <div className="canvas-space-list" role="menu" aria-label="切换画布空间">
+              {canvasHomeSpaces.map((space) => <button type="button" role="menuitemradio" key={space.id} aria-label={`切换到${space.name}`} aria-checked={space.id === activeSpace.id} onClick={() => selectSpace(space.id)}>
+                <span className={`canvas-space-avatar is-${space.tone}`}>{space.avatar}</span>
+                <span className="canvas-space-info"><strong>{space.name}</strong><small>{space.meta}</small></span>
+                {space.id === activeSpace.id && <Check className="canvas-space-selected" size={15} aria-hidden="true" />}
+              </button>)}
+            </div>
+          </section>
+        </AnchoredPopover>
+      </div>
+    </header>
+
+    <section className="canvas-home-content" aria-label={canvasHomeTitle}>
+      <header className="canvas-home-heading">
+        <div><h1>{canvasHomeTitle}</h1></div>
+        <div className="canvas-home-actions">
+          <label className="canvas-home-search"><Search size={17} /><span className="sr-only">搜索画布</span><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="搜索画布" /></label>
+          <div className="canvas-home-view-toggle" role="group" aria-label="画布排列方式">
+            <button type="button" onClick={() => setViewMode('grid')} aria-label="切换为网格视图" aria-pressed={viewMode === 'grid'} title="网格视图"><Grid3X3 size={16} /></button>
+            <button type="button" onClick={() => setViewMode('list')} aria-label="切换为列表视图" aria-pressed={viewMode === 'list'} title="列表视图"><List size={17} /></button>
+          </div>
+          <button type="button" className="canvas-home-create" onClick={onCreate}><Plus size={17} />新建画布</button>
+        </div>
+      </header>
+
+      <div className={`canvas-home-grid ${viewMode === 'list' ? 'is-list' : ''}`}>
+        {viewMode === 'list' && <div className="canvas-home-list-header" aria-hidden="true"><span>预览</span><span>名称</span><span>创建时间</span><span>最近更新</span><span /></div>}
+        {viewMode === 'grid' && <button type="button" className="canvas-home-card canvas-home-new-card" onClick={onCreate}><CirclePlus size={34} /><span>新建画布</span></button>}
+        {visibleProjects.map((project) => {
+          const selected = selectedSet.has(project.id)
+          return <article className={`canvas-home-card canvas-home-existing-card ${selected ? 'is-selected' : ''}`} key={project.id}>
+            <button type="button" className="canvas-home-card-open" onClick={() => selectionMode ? toggleProjectSelection(project.id) : onOpen(project.id)} aria-label={selectionMode ? `${selected ? '取消选择' : '选择'}${project.name}` : `打开${project.name}`}>
+              <span className="canvas-home-card-cover"><CanvasCardCover project={project} /></span>
+            </button>
+            <div className="canvas-home-card-copy">
+              <span className="canvas-home-card-title-row">
+                {renameProjectId === project.id ? <input className="canvas-home-card-title-input" aria-label={`修改${project.name}名称`} autoFocus size={Math.max(4, Math.min(project.name.length + 1, 18))} value={renameDraft} onFocus={(event) => event.currentTarget.select()} onChange={(event) => setRenameDraft(event.target.value)} onBlur={confirmRename} onKeyDown={(event) => {
+                  if (event.key === 'Enter') {
+                    event.preventDefault()
+                    confirmRename()
+                  }
+                  if (event.key === 'Escape') {
+                    event.preventDefault()
+                    cancelRename()
+                  }
+                }} /> : <>
+                  <button type="button" className="canvas-home-card-title" onClick={() => selectionMode ? toggleProjectSelection(project.id) : onOpen(project.id)} aria-label={selectionMode ? `${selected ? '取消选择' : '选择'}${project.name}` : undefined}>{project.name}</button>
+                  {!selectionMode && <button type="button" className="canvas-home-card-rename" onClick={() => startRename(project)} aria-label={`重命名${project.name}`} title="重命名画布"><Pencil size={14} /></button>}
+                </>}
+              </span>
+              <span className="canvas-home-card-created-at">{formatCanvasCreatedAt(project.createdAt)}</span>
+              <small>{formatCanvasUpdatedAt(project.updatedAt ?? project.createdAt)}</small>
+            </div>
+            {selectionMode ? <button type="button" className="canvas-home-checkbox" onClick={() => toggleProjectSelection(project.id)} aria-label={`${selected ? '取消选择' : '选择'}${project.name}`} aria-pressed={selected}>{selected && <Check size={15} />}</button> : <>
+              <button ref={menuProjectId === project.id ? activeProjectMenuTriggerRef : undefined} type="button" className="canvas-home-card-more" onClick={() => setMenuProjectId((current) => current === project.id ? null : project.id)} aria-label={`管理${project.name}`} aria-haspopup="menu" aria-expanded={menuProjectId === project.id}><Ellipsis size={19} /></button>
+              {menuProjectId === project.id && <div ref={activeProjectMenuRef} className="canvas-home-card-menu" role="menu" aria-label={`${project.name}操作`}>
+                <button type="button" role="menuitem" onClick={() => { setMenuProjectId(null); onOpen(project.id) }}><FolderOpen size={16} />打开</button>
+                <button type="button" role="menuitem" onClick={() => startRename(project)}><Pencil size={16} />重命名</button>
+                <button type="button" role="menuitem" onClick={() => enterSelectionMode(project.id)}><Check size={16} />选择</button>
+                <span className="canvas-home-menu-divider" />
+                <button type="button" role="menuitem" className="danger" onClick={() => { setMenuProjectId(null); setPendingDeleteIds([project.id]) }}><Trash2 size={16} />删除</button>
+              </div>}
+            </>}
+          </article>
+        })}
+        {normalizedQuery && !visibleProjects.length && <p className="canvas-home-empty-search">未找到匹配的画布</p>}
+      </div>
+    </section>
+
+    {selectionMode && <div className="canvas-home-selection-bar" role="toolbar" aria-label="批量管理画布"><button type="button" aria-label="退出选择" onClick={exitSelectionMode}><X size={18} /></button><strong>已选择 {selectedProjectIds.length} 个画布</strong><button type="button" className="canvas-home-bulk-delete" disabled={!selectedProjectIds.length} onClick={() => setPendingDeleteIds(selectedProjectIds)} aria-label="删除已选画布"><Trash2 size={18} /></button></div>}
+
+    {pendingDeleteIds.length > 0 && <div className="canvas-delete-backdrop" onMouseDown={() => setPendingDeleteIds([])}><section className="canvas-delete-dialog" role="alertdialog" aria-modal="true" aria-label="删除画布" onMouseDown={(event) => event.stopPropagation()}><div className="canvas-delete-icon"><Trash2 size={18} /></div><div><strong>删除 {pendingDeleteIds.length} 个画布？</strong><p>画布中的节点和任务将从本次会话中移除。</p></div><footer><button type="button" onClick={() => setPendingDeleteIds([])}>取消</button><button type="button" className="danger" onClick={confirmDelete}>删除画布</button></footer></section></div>}
+  </main>
 }
 
 function CanvasPrototype() {
   const stableNodeTypes = useMemo(() => nodeTypes, [])
   const stableEdgeTypes = useMemo(() => edgeTypes, [])
   const [workspace] = useState(initialWorkspace)
-  const [canvases, setCanvases] = useState<CanvasDocument[]>(workspace.canvases)
-  const [activeCanvasId, setActiveCanvasId] = useState(workspace.activeCanvasId)
+  const [projects, setProjects] = useState<CanvasProject[]>(workspace.projects)
+  const [activeProjectId, setActiveProjectId] = useState(workspace.activeProjectId)
+  const [screen, setScreen] = useState<'home' | 'canvas'>(() => workspace.openInCanvas ? 'canvas' : 'home')
   const [drawer, setDrawer] = useState<DrawerKey>(null)
   const [showMiniMap, setShowMiniMap] = useState(false)
   const [snapEnabled, setSnapEnabled] = useState(true)
@@ -1163,27 +1424,48 @@ function CanvasPrototype() {
   const [playlistDropPreview, setPlaylistDropPreview] = useState<PlaylistDropPreview | null>(null)
   const [imageEditor, setImageEditor] = useState<ImageEditorState | null>(null)
   const canvasMenuButtonRef = useRef<HTMLButtonElement>(null)
+  const shareMenuRef = useRef<HTMLDivElement>(null)
+  const canvasToolPickerRef = useRef<HTMLDivElement>(null)
+  const leftRailRef = useRef<HTMLElement>(null)
+  const drawerPanelRef = useRef<HTMLElement>(null)
   const { fitView, flowToScreenPosition, getViewport, setCenter, setViewport, zoomIn, zoomOut, screenToFlowPosition } = useReactFlow<CanvasFlowNode, CanvasFlowEdge>()
   const taskTimers = useRef<number[]>([])
   const nodeCounter = useRef(8)
-  const canvasCounter = useRef(2)
   const groupCounter = useRef(1)
   const connectSourceRef = useRef<string | null>(null)
+  const connectStartHandleTypeRef = useRef<'source' | 'target' | null>(null)
   const spacePressedRef = useRef(false)
   const suppressPaneClickRef = useRef(false)
   const blankCanvasTapRef = useRef<{ x: number; y: number; time: number } | null>(null)
   const pendingQuickAddRef = useRef<{ x: number; y: number; pointerId: number } | null>(null)
+
+  useDismissableLayer({ open: shareMenuOpen, onClose: () => setShareMenuOpen(false), boundaryRefs: [shareMenuRef] })
+  useDismissableLayer({ open: canvasToolOpen, onClose: () => setCanvasToolOpen(false), boundaryRefs: [canvasToolPickerRef] })
+  useDismissableLayer({ open: Boolean(drawer), onClose: () => setDrawer(null), boundaryRefs: [leftRailRef, drawerPanelRef] })
   const marqueeRef = useRef<MarqueeState | null>(null)
   const spacePanRef = useRef<SpacePanState | null>(null)
-  const histories = useRef<Record<string, CanvasSnapshot[]>>({ [workspace.activeCanvasId]: [] })
-  const futures = useRef<Record<string, CanvasSnapshot[]>>({ [workspace.activeCanvasId]: [] })
+  const workspaceActiveProject = projects.find((project) => project.id === activeProjectId) ?? projects[0]
+  const workspaceActiveCanvasId = workspaceActiveProject ? canvasProjectActiveCanvas(workspaceActiveProject)?.id ?? '' : ''
+  const histories = useRef<Record<string, CanvasSnapshot[]>>({ [workspaceActiveCanvasId]: [] })
+  const futures = useRef<Record<string, CanvasSnapshot[]>>({ [workspaceActiveCanvasId]: [] })
   const nodeDragRef = useRef<NodeDragState | null>(null)
   const playlistDropPreviewRef = useRef<PlaylistDropPreview | null>(null)
+  const projectsRef = useRef(projects)
+  const activeProjectIdRef = useRef(activeProjectId)
+  const activeProject = projects.find((project) => project.id === activeProjectId) ?? projects[0]
+  const canvases = activeProject?.canvases ?? []
+  const activeCanvasId = activeProject?.activeCanvasId ?? ''
   const canvasesRef = useRef(canvases)
   const activeCanvasIdRef = useRef(activeCanvasId)
   const toastTimer = useRef<number | null>(null)
 
-  const activeCanvas = canvases.find((canvas) => canvas.id === activeCanvasId) ?? canvases[0]
+  const activeCanvas = canvases.find((canvas) => canvas.id === activeCanvasId) ?? canvases[0] ?? EMPTY_CANVAS
+  const setCanvases = useCallback((update: SetStateAction<CanvasDocument[]>) => {
+    setProjects((current) => updateProjectCanvases(current, activeProjectIdRef.current, (projectCanvases) => applyListUpdate(projectCanvases, update)))
+  }, [])
+  const setActiveCanvasId = useCallback((canvasId: string) => {
+    setProjects((current) => current.map((project) => project.id === activeProjectIdRef.current ? { ...project, activeCanvasId: canvasId } : project))
+  }, [])
   const nodes = activeCanvas.nodes
   const edges = activeCanvas.edges
   const tasks = activeCanvas.tasks
@@ -1330,6 +1612,8 @@ function CanvasPrototype() {
   const tasksRef = useRef(tasks)
   const playlistsRef = useRef(playlists)
 
+  useEffect(() => { projectsRef.current = projects }, [projects])
+  useEffect(() => { activeProjectIdRef.current = activeProjectId }, [activeProjectId])
   useEffect(() => { canvasesRef.current = canvases }, [canvases])
   useEffect(() => { activeCanvasIdRef.current = activeCanvasId }, [activeCanvasId])
   useEffect(() => { nodesRef.current = nodes }, [nodes])
@@ -1366,7 +1650,18 @@ function CanvasPrototype() {
   }, [activeCanvas, getViewport, notify])
 
   const updateCanvas = useCallback((canvasId: string, updater: (canvas: CanvasDocument) => CanvasDocument) => {
-    setCanvases((current) => current.map((canvas) => canvas.id === canvasId ? updater(canvas) : canvas))
+    setProjects((current) => current.map((project) => {
+      let changed = false
+      const canvases = project.canvases.map((canvas) => {
+        if (canvas.id !== canvasId) return canvas
+        const next = updater(canvas)
+        if (next === canvas) return canvas
+        changed = true
+        const now = Date.now()
+        return { ...next, createdAt: next.createdAt ?? canvas.createdAt ?? now, updatedAt: now }
+      })
+      return changed ? { ...project, canvases, updatedAt: Date.now() } : project
+    }))
   }, [])
 
   const setNodes = useCallback((update: SetStateAction<CanvasFlowNode[]>) => {
@@ -1401,7 +1696,7 @@ function CanvasPrototype() {
       return {
         ...canvas,
         nodes: syncTargetReferences(contentChanged
-          ? markDownstreamNodesStale(updatedNodes, canvas.edges, [nodeId])
+          ? markDirectDependentsStale(updatedNodes, canvas.edges, [nodeId])
           : updatedNodes, canvas.edges),
       }
     })
@@ -1509,7 +1804,7 @@ function CanvasPrototype() {
       return {
         ...canvas,
         edges: nextEdges,
-        nodes: syncTargetReferences(markDownstreamNodesStale(canvas.nodes, nextEdges, staleTargets, true), nextEdges),
+        nodes: syncTargetReferences(markNodesStale(canvas.nodes, staleTargets), nextEdges),
       }
     })
   }, [activeCanvasId, setEdges, updateCanvas])
@@ -1539,7 +1834,7 @@ function CanvasPrototype() {
     const nextEdges = edgesRef.current.filter((edge) => edge.id !== edgeId)
     updateCanvas(activeCanvasId, (canvas) => {
       const nextNodes = deletedEdge.data?.relationType === 'generation-input'
-        ? markDownstreamNodesStale(canvas.nodes, nextEdges, [deletedEdge.target], true)
+        ? markNodesStale(canvas.nodes, [deletedEdge.target])
         : canvas.nodes
       return { ...canvas, edges: nextEdges, nodes: syncTargetReferences(nextNodes, nextEdges) }
     })
@@ -1568,7 +1863,7 @@ function CanvasPrototype() {
     const nextEdges = addEdge({ ...normalized, type: 'canvas', data: { relationType: 'generation-input', inputRole } }, edgesRef.current)
     updateCanvas(activeCanvasId, (canvas) => {
       const nextNodes = normalized.target
-        ? markDownstreamNodesStale(canvas.nodes, nextEdges, [normalized.target], true)
+        ? markNodesStale(canvas.nodes, [normalized.target])
         : canvas.nodes
       return { ...canvas, edges: nextEdges, nodes: syncTargetReferences(nextNodes, nextEdges) }
     })
@@ -1612,6 +1907,7 @@ function CanvasPrototype() {
   }, [notify, screenToFlowPosition])
 
   const onConnectStart: OnConnectStart = useCallback((_event, params) => {
+    connectStartHandleTypeRef.current = params.handleType
     const sourceNodeId = params.handleType === 'source' ? params.nodeId ?? null : null
     connectSourceRef.current = sourceNodeId
     setConnectingSourceNodeId(sourceNodeId)
@@ -1620,12 +1916,18 @@ function CanvasPrototype() {
   }, [])
 
   const onConnectEnd: OnConnectEnd = useCallback((event, connectionState) => {
-    const sourceNodeId = connectSourceRef.current ?? connectionState.fromNode?.id ?? null
+    const startedFromSource = connectStartHandleTypeRef.current === 'source'
+    const sourceNodeId = startedFromSource ? connectSourceRef.current ?? connectionState.fromNode?.id ?? null : null
     connectSourceRef.current = null
+    connectStartHandleTypeRef.current = null
     setConnectingSourceNodeId(null)
-    if (connectionState.isValid || !sourceNodeId) return
+    if (connectionState.isValid) return
     const pointer = 'changedTouches' in event ? event.changedTouches[0] : event
     if (!pointer) return
+    if (!startedFromSource || !sourceNodeId) {
+      notify('未找到目标')
+      return
+    }
     const dropTarget = document.elementFromPoint(pointer.clientX, pointer.clientY)
     const targetElement = dropTarget?.closest<HTMLElement>('.react-flow__node')
     const targetNodeId = targetElement?.dataset.id
@@ -1634,7 +1936,7 @@ function CanvasPrototype() {
       return
     }
     openContinuation(sourceNodeId, pointer.clientX, pointer.clientY)
-  }, [connectNodes, openContinuation])
+  }, [connectNodes, notify, openContinuation])
 
   const createContinuationTarget = useCallback((targetType: MediaNodeType) => {
     if (!continuation) return
@@ -1709,7 +2011,7 @@ function CanvasPrototype() {
       return {
         ...canvas,
         edges: nextEdges,
-        nodes: syncTargetReferences(markDownstreamNodesStale([...canvas.nodes.map((node) => ({ ...node, selected: false })), source], nextEdges, [target.id], true), nextEdges),
+        nodes: syncTargetReferences(markNodesStale([...canvas.nodes.map((node) => ({ ...node, selected: false })), source], [target.id]), nextEdges),
       }
     })
     setContextAdd(null)
@@ -1937,7 +2239,7 @@ function CanvasPrototype() {
       if (!hasActiveBatch()) return
       updateCanvas(canvasId, (current) => ({
         ...current,
-        nodes: syncTargetReferences(markDownstreamNodesStale(current.nodes.map((node) => nodeIds.has(node.id) && current.tasks.some((task) => taskIds.has(task.id) && task.nodeId === node.id && (task.status === 'queued' || task.status === 'running'))
+        nodes: syncTargetReferences(markDirectDependentsStale(current.nodes.map((node) => nodeIds.has(node.id) && current.tasks.some((task) => taskIds.has(task.id) && task.nodeId === node.id && (task.status === 'queued' || task.status === 'running'))
           ? { ...node, data: buildVideoResultData(node.data, DEFAULT_VIDEO_MEDIA, { params: snapshot.videoGeneration }) }
           : node), current.edges, [source.id]), current.edges),
         tasks: current.tasks.map((task) => taskIds.has(task.id) && (task.status === 'queued' || task.status === 'running')
@@ -1951,6 +2253,75 @@ function CanvasPrototype() {
     if (focus) window.setTimeout(() => setCenter(focus.position.x + 220, focus.position.y + 330, { zoom: 0.78, duration: 300 }), 20)
   }, [activeCanvasId, notify, saveHistory, setCenter, updateCanvas])
 
+  const startTextModelTask = useCallback(async ({ canvasId, nodeId, taskId, modelId, prompt, title }: {
+    canvasId: string
+    nodeId: string
+    taskId: string
+    modelId: string
+    prompt: string
+    title: string
+  }) => {
+    const failTask = (message: string) => {
+      updateCanvas(canvasId, (current) => ({
+        ...current,
+        nodes: current.nodes.map((item) => item.id === nodeId
+          ? { ...item, data: { ...item.data, status: 'failed', progress: 0, error: message } }
+          : item),
+        tasks: current.tasks.map((item) => item.id === taskId
+          ? { ...item, status: 'failed', progress: 0, error: message }
+          : item),
+      }))
+      if (activeCanvasIdRef.current === canvasId) notify(message)
+    }
+
+    updateCanvasTask(canvasId, taskId, { status: 'running', progress: 22 })
+    patchCanvasNode(canvasId, nodeId, { status: 'running', progress: 22 })
+
+    try {
+      const result = await requestTextModelCompletion({ tid: Date.now(), modelId, userPrompt: prompt })
+      updateCanvas(canvasId, (current) => {
+        const currentNode = current.nodes.find((item) => item.id === nodeId)
+        const currentTask = current.tasks.find((item) => item.id === taskId)
+        if (!currentNode || !currentTask || (currentTask.status !== 'queued' && currentTask.status !== 'running')) return current
+
+        const updatedNodes = current.nodes.map((item): CanvasFlowNode => item.id === nodeId
+          ? {
+              ...item,
+              data: {
+                ...item.data,
+                content: result.content,
+                status: 'success',
+                progress: 100,
+                sourceKind: 'generated',
+                error: undefined,
+                staleNoticeDismissed: undefined,
+              },
+            }
+          : item)
+        const nodesWithStaleDirectDependents = markDirectDependentsStale(updatedNodes, current.edges, [nodeId])
+        return {
+          ...current,
+          nodes: syncTargetReferences(nodesWithStaleDirectDependents, current.edges),
+          tasks: current.tasks.map((item) => item.id === taskId
+            ? {
+                ...item,
+                status: 'success',
+                progress: 100,
+                error: undefined,
+                providerTaskId: result.providerTaskId,
+                providerFinishReason: result.finishReason,
+              }
+            : item),
+        }
+      })
+      if (activeCanvasIdRef.current === canvasId) {
+        notify(result.finishReason === 'length' ? `${title}生成完成，输出可能已截断` : `${title}生成完成`)
+      }
+    } catch (error) {
+      failTask(error instanceof TextModelRequestError ? error.message : '文本模型调用失败，请稍后重试')
+    }
+  }, [notify, patchCanvasNode, updateCanvas, updateCanvasTask])
+
   const startTask = useCallback((nodeId: string, bypassValidation = false) => {
     const target = nodesRef.current.find((node) => node.id === nodeId)
     if (target?.data.nodeType === 'video') return startVideoTask(nodeId, bypassValidation)
@@ -1961,6 +2332,9 @@ function CanvasPrototype() {
     const references = node.data.references ?? []
     if (!bypassValidation && references.length === 0 && !(node.data.localPrompt ?? '').trim()) return notify('请输入生成要求或添加参考')
 
+    const textModelId = node.data.nodeType === 'text'
+      ? (isTextModelId(node.data.modelId) ? node.data.modelId : PUBLIC_TEXT_MODEL_MOCK_ID)
+      : undefined
     const taskId = `task-${Date.now()}`
     const task: GenerationTask = {
       id: taskId,
@@ -1975,16 +2349,36 @@ function CanvasPrototype() {
       inputReferences: structuredClone(references),
       promptMarkers: structuredClone(node.data.promptMarkers ?? []),
       imageGeneration: node.data.imageGeneration ? structuredClone(node.data.imageGeneration) : undefined,
-      modelLabel: node.data.modelId === 'gemini-flash-lite' ? 'Gemini 3.1 Flash Lite' : node.data.nodeType === 'image' ? 'Seedream 3.0' : node.data.nodeType === 'audio' ? audioModelLabel(node.data.modelId) : '示例模型',
+      modeId: node.data.modeId,
+      modelId: textModelId ?? node.data.modelId,
+      modelLabel: node.data.nodeType === 'text'
+        ? textModelLabel(textModelId)
+        : node.data.nodeType === 'image'
+          ? 'Seedream 3.0'
+          : node.data.nodeType === 'audio'
+            ? audioModelLabel(node.data.modelId)
+            : '示例模型',
       cost: node.data.cost ?? (node.data.nodeType === 'text' ? 1 : 35),
       createdAt: new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }),
     }
     updateCanvas(canvasId, (current) => ({
       ...current,
       tasks: [task, ...current.tasks],
-      nodes: syncTargetReferences(updateNodeData(current.nodes, nodeId, { status: 'queued', progress: 0, error: undefined }), current.edges),
+      nodes: syncTargetReferences(updateNodeData(current.nodes, nodeId, { status: 'queued', progress: 0, error: undefined, modelId: textModelId ?? node.data.modelId }), current.edges),
     }))
     notify('任务已进入队列')
+
+    if (node.data.nodeType === 'text') {
+      void startTextModelTask({
+        canvasId,
+        nodeId,
+        taskId,
+        modelId: textModelId ?? PUBLIC_TEXT_MODEL_MOCK_ID,
+        prompt: task.effectivePrompt,
+        title: node.data.title,
+      })
+      return
+    }
 
     taskTimers.current.push(window.setTimeout(() => {
       updateCanvasTask(canvasId, taskId, { status: 'running', progress: 24 })
@@ -2038,17 +2432,17 @@ function CanvasPrototype() {
             extraTasks.push({ ...task, id: `${taskId}-${index}`, nodeId: copyId, nodeTitle: `${updatedNode.data.title} ${index + 1}`, status: 'success', progress: 100 })
           }
         }
-        const nodesWithStaleDownstream = markDownstreamNodesStale(nextNodes, nextEdges, [nodeId])
+        const nodesWithStaleDirectDependents = markDirectDependentsStale(nextNodes, nextEdges, [nodeId])
         return {
           ...current,
-          nodes: syncTargetReferences(nodesWithStaleDownstream, nextEdges),
+          nodes: syncTargetReferences(nodesWithStaleDirectDependents, nextEdges),
           edges: nextEdges,
           tasks: current.tasks.map((item): GenerationTask => item.id === taskId ? { ...item, status: 'success', progress: 100 } : item).concat(extraTasks),
         }
       })
       if (activeCanvasIdRef.current === canvasId) notify(`${node.data.title}生成完成`)
     }, 2300))
-  }, [activeCanvasId, notify, patchCanvasNode, startVideoTask, updateCanvas, updateCanvasTask])
+  }, [activeCanvasId, notify, patchCanvasNode, startTextModelTask, startVideoTask, updateCanvas, updateCanvasTask])
 
   const retryGeneration = useCallback((nodeId: string) => startTask(nodeId, true), [startTask])
 
@@ -2467,7 +2861,7 @@ function CanvasPrototype() {
           : node)
         return {
           ...canvas,
-          nodes: syncTargetReferences(markDownstreamNodesStale(completedNodes, canvas.edges, [nodeId]), canvas.edges),
+          nodes: syncTargetReferences(markDirectDependentsStale(completedNodes, canvas.edges, [nodeId]), canvas.edges),
           tasks: canvas.tasks.map((item) => item.id === taskId
             ? { ...item, status: 'success', progress: 100, outputMedia: imageMediaForVariant('anime') }
             : item),
@@ -3646,10 +4040,10 @@ function CanvasPrototype() {
     notify(color ? `已清空${labels[color]} Pin` : '已清空全部 Pin')
   }, [notify, setNodes])
 
-  const createCanvas = useCallback(() => {
-    const number = canvasCounter.current++
+  const createSubCanvas = useCallback(() => {
     const id = `canvas-${Date.now()}`
-    const canvas: CanvasDocument = { id, name: `画布 ${number}`, nodes: [], edges: [], tasks: [], groups: [], playlists: [], viewport: { ...DEFAULT_VIEWPORT } }
+    const now = Date.now()
+    const canvas: CanvasDocument = { id, name: '未命名', createdAt: now, updatedAt: now, nodes: [], edges: [], tasks: [], groups: [], playlists: [], viewport: { ...DEFAULT_VIEWPORT } }
     histories.current[id] = []
     futures.current[id] = []
     setCanvases((current) => [...current, canvas])
@@ -3663,8 +4057,31 @@ function CanvasPrototype() {
     setInteractionMode(null)
     setAlignmentGuides([])
     setZoom(DEFAULT_VIEWPORT.zoom)
+    setScreen('canvas')
     window.setTimeout(() => setViewport(DEFAULT_VIEWPORT, { duration: 180 }), 20)
     notify(`${canvas.name}已创建`)
+  }, [notify, setViewport])
+
+  const createProjectFromHome = useCallback(() => {
+    const now = Date.now()
+    const canvas: CanvasDocument = { id: `canvas-${now}`, name: '未命名', createdAt: now, updatedAt: now, nodes: [], edges: [], tasks: [], groups: [], playlists: [], viewport: { ...DEFAULT_VIEWPORT } }
+    const project = createCanvasProject(`project-${now}`, '未命名', canvas, now)
+    histories.current[canvas.id] = []
+    futures.current[canvas.id] = []
+    setProjects((current) => [...current, project])
+    setActiveProjectId(project.id)
+    setCanvasMenuOpen(false)
+    setCanvasActionsId(null)
+    setDrawer(null)
+    setQuickAdd(null)
+    setContinuation(null)
+    setContextAdd(null)
+    setInteractionMode(null)
+    setAlignmentGuides([])
+    setZoom(DEFAULT_VIEWPORT.zoom)
+    setScreen('canvas')
+    window.setTimeout(() => setViewport(DEFAULT_VIEWPORT, { duration: 180 }), 20)
+    notify(`${project.name}已创建`)
   }, [notify, setViewport])
 
   const switchCanvas = useCallback((canvasId: string) => {
@@ -3703,6 +4120,8 @@ function CanvasPrototype() {
     const canvas = structuredClone(source)
     canvas.id = id
     canvas.name = `${source.name} 副本`
+    canvas.createdAt = Date.now()
+    canvas.updatedAt = canvas.createdAt
     canvas.nodes = canvas.nodes.map((node) => ({ ...node, selected: false }))
     canvas.edges = canvas.edges.map((edge) => ({ ...edge, selected: false }))
     canvas.tasks = canvas.tasks.map((task) => ({ ...task, canvasId: id }))
@@ -3713,30 +4132,58 @@ function CanvasPrototype() {
     setCanvasMenuOpen(false)
     setCanvasActionsId(null)
     setDrawer(null)
+    setScreen('canvas')
     setZoom(canvas.viewport.zoom)
     window.setTimeout(() => setViewport(canvas.viewport, { duration: 180 }), 20)
     notify(`已复制为${canvas.name}`)
   }, [notify, setViewport])
 
-  const deleteCanvas = useCallback((canvasId: string) => {
+  const deleteCanvases = useCallback((canvasIds: string[]) => {
+    const ids = new Set(canvasIds)
+    if (!ids.size) return
     const current = canvasesRef.current
-    const target = current.find((canvas) => canvas.id === canvasId)
-    if (!target) return
-    if (current.length === 1) return notify('至少保留一张画布')
-    const remaining = current.filter((canvas) => canvas.id !== canvasId)
-    delete histories.current[canvasId]
-    delete futures.current[canvasId]
+    const removed = current.filter((canvas) => ids.has(canvas.id))
+    if (!removed.length) return
+    const remaining = current.filter((canvas) => !ids.has(canvas.id))
+    removed.forEach((canvas) => {
+      delete histories.current[canvas.id]
+      delete futures.current[canvas.id]
+    })
     setCanvases(remaining)
     setCanvasActionsId(null)
     setDeleteCanvasId(null)
-    if (activeCanvasIdRef.current === canvasId) {
+    if (ids.has(activeCanvasIdRef.current)) {
       const next = remaining[0]
-      setActiveCanvasId(next.id)
-      setZoom(next.viewport.zoom)
-      window.setTimeout(() => setViewport(next.viewport, { duration: 180 }), 20)
+      if (next) {
+        setActiveCanvasId(next.id)
+        setZoom(next.viewport.zoom)
+        window.setTimeout(() => setViewport(next.viewport, { duration: 180 }), 20)
+      } else {
+        setActiveCanvasId('')
+        setScreen('home')
+      }
     }
-    notify(`已删除${target.name}`)
+    notify(removed.length === 1 ? `已删除${removed[0].name}` : `已删除${removed.length} 个画布`)
   }, [notify, setViewport])
+
+  const deleteCanvas = useCallback((canvasId: string) => deleteCanvases([canvasId]), [deleteCanvases])
+
+  const deleteProjects = useCallback((projectIds: string[]) => {
+    const ids = new Set(projectIds)
+    if (!ids.size) return
+    const current = projectsRef.current
+    const removed = current.filter((project) => ids.has(project.id))
+    if (!removed.length) return
+    removed.flatMap((project) => project.canvases).forEach((canvas) => {
+      delete histories.current[canvas.id]
+      delete futures.current[canvas.id]
+    })
+    const remaining = current.filter((project) => !ids.has(project.id))
+    setProjects(remaining)
+    if (ids.has(activeProjectId)) setActiveProjectId(remaining[0]?.id ?? '')
+    setScreen('home')
+    notify(removed.length === 1 ? `已删除${removed[0].name}` : `已删除${removed.length} 个画布`)
+  }, [activeProjectId, notify])
 
   const openCanvasInWindow = useCallback((canvasId: string) => {
     const target = canvasesRef.current.find((canvas) => canvas.id === canvasId)
@@ -3767,6 +4214,7 @@ function CanvasPrototype() {
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
+      if (event.isComposing || event.key === 'Process') return
       if (imageEditor) return
       if (areCanvasShortcutsIsolated(document)) return
       const target = event.target as HTMLElement
@@ -3942,13 +4390,41 @@ function CanvasPrototype() {
     : node), [nodes, playlistDropPreview?.nodeId])
   const continuationSource = continuation ? nodes.find((node) => node.id === continuation.sourceNodeId) : undefined
   const contextAddTarget = contextAdd ? nodes.find((node) => node.id === contextAdd.targetNodeId) : undefined
+  const openProjectFromHome = useCallback((projectId: string) => {
+    const project = projectsRef.current.find((item) => item.id === projectId)
+    const canvas = project ? canvasProjectActiveCanvas(project) : undefined
+    if (!project || !canvas) return
+    setActiveProjectId(project.id)
+    setCanvasMenuOpen(false)
+    setCanvasActionsId(null)
+    setDrawer(null)
+    setQuickAdd(null)
+    setContinuation(null)
+    setContextAdd(null)
+    setInteractionMode(null)
+    setAlignmentGuides([])
+    setZoom(canvas.viewport.zoom)
+    setScreen('canvas')
+    window.setTimeout(() => setViewport(canvas.viewport, { duration: 180 }), 20)
+  }, [setViewport])
+  const renameProjectFromHome = useCallback((projectId: string, name: string) => {
+    setProjects((current) => current.map((project) => project.id === projectId ? { ...project, name, updatedAt: Date.now() } : project))
+    notify('画布名称已更新')
+  }, [notify])
+
+  if (screen === 'home' || !activeProject) {
+    return <CanvasActionContext.Provider value={actions}>
+      <CanvasHome projects={projects} onCreate={createProjectFromHome} onOpen={openProjectFromHome} onRename={renameProjectFromHome} onDelete={deleteProjects} />
+      {toast && <div className="toast canvas-home-toast" role="status" aria-live="polite">{toast}</div>}
+    </CanvasActionContext.Provider>
+  }
 
   return (
     <CanvasActionContext.Provider value={actions}>
       <main className="prototype-shell">
         <header className="canvas-topbar">
           <div className="canvas-identity">
-            <div className="brand-lockup" aria-label="节点式画布"><span>节点</span><span>灵创</span></div>
+            <button type="button" className="brand-lockup canvas-home-link" onClick={() => { setScreen('home'); setCanvasMenuOpen(false); setCanvasActionsId(null) }} aria-label="返回我的画布"><span>节点</span><span>灵创</span></button>
             <button
               ref={canvasMenuButtonRef}
               type="button"
@@ -3958,16 +4434,16 @@ function CanvasPrototype() {
               aria-haspopup="menu"
               aria-expanded={canvasMenuOpen}
             >
-              <span>产品宣传片</span><i>/</i><strong>{activeCanvas.name}</strong><ChevronDown size={14} />
+              <span>{activeProject.name}</span><i>/</i><strong>{activeCanvas.name}</strong><ChevronDown size={14} />
             </button>
           </div>
-          <div className="canvas-status"><button type="button" className="credit-pill"><span className="chestnut-dot" />生产栗 <strong>681</strong></button><div className="share-entry"><button type="button" className="share-button ui-tooltip-control share-tooltip" data-tooltip="发布与分享" onClick={() => setShareMenuOpen((current) => !current)}><Share2 size={16} />分享</button>{shareMenuOpen && <section className="share-menu" role="menu" aria-label="发布与分享"><strong>发布与分享</strong><button type="button" role="menuitem" onClick={openShareLink}><span><Link2 size={18} /></span><p><b>分享链接</b><small>拥有此链接的人可以查看并复制你的画布。</small></p></button></section>}</div></div>
+          <div className="canvas-status"><button type="button" className="credit-pill"><span className="chestnut-dot" />生产栗 <strong>681</strong></button><div ref={shareMenuRef} className="share-entry"><button type="button" className="share-button ui-tooltip-control share-tooltip" data-tooltip="发布与分享" onClick={() => setShareMenuOpen((current) => !current)}><Share2 size={16} />分享</button>{shareMenuOpen && <section className="share-menu" role="menu" aria-label="发布与分享"><strong>发布与分享</strong><button type="button" role="menuitem" onClick={openShareLink}><span><Link2 size={18} /></span><p><b>分享链接</b><small>拥有此链接的人可以查看并复制你的画布。</small></p></button></section>}</div></div>
         </header>
 
         {shareDialogOpen && <div className="share-dialog-layer" data-canvas-overlay="true" onMouseDown={() => setShareDialogOpen(false)}><section className="share-dialog" role="dialog" aria-modal="true" aria-label="分享链接" onMouseDown={(event) => event.stopPropagation()}><header><strong>分享链接</strong><button type="button" onClick={() => setShareDialogOpen(false)} aria-label="关闭分享链接"><X size={18} /></button></header><div className="share-dialog-link"><input value={shareLink} readOnly aria-label="分享链接地址" /><button type="button" onClick={async () => { try { await copyCanvasShareLink(shareLink); notify('链接已复制') } catch { notify('复制失败，请检查浏览器权限') } }}><Copy size={15} />复制链接</button></div><div className="share-dialog-access"><strong>访问权限设置</strong><label><span>选择范围</span><select value={shareAccess} onChange={(event) => { const next = event.target.value as 'public' | 'private'; setShareAccess(next); if (next === 'private') { const token = canvasShareTokenFromHash(new URL(shareLink).hash); if (token) window.localStorage.removeItem(`node-canvas-share:${token}`) } }}><option value="public">公开访问</option><option value="private">仅自己可见</option></select></label>{shareAccess === 'private' && <small>已撤销外部访问，已有链接不可继续查看。</small>}</div></section></div>}
 
         <AnchoredPopover anchorRef={canvasMenuButtonRef} open={canvasMenuOpen} onClose={() => { setCanvasMenuOpen(false); setCanvasActionsId(null) }} className="canvas-switcher-menu" align="start">
-          <header><strong>画布</strong><button type="button" onClick={createCanvas} aria-label="新建画布" title="新建画布"><Plus size={16} /></button></header>
+          <header><strong>画布</strong><button type="button" onClick={createSubCanvas} aria-label="新建画布" title="新建画布"><Plus size={16} /></button></header>
           <div className="canvas-menu-list">
             {canvases.map((canvas) => (
               <div className={`canvas-menu-row ${canvas.id === activeCanvasId ? 'active' : ''}`} key={canvas.id}>
@@ -3981,17 +4457,17 @@ function CanvasPrototype() {
                   <button type="button" role="menuitem" onClick={() => openCanvasInWindow(canvas.id)}><ExternalLink size={14} />在新窗口打开</button>
                   <button type="button" role="menuitem" onClick={() => { setCanvasActionsId(null); startCanvasRename(canvas) }}><Pencil size={14} />重命名画布</button>
                   <button type="button" role="menuitem" onClick={() => duplicateCanvas(canvas.id)}><Copy size={14} />复制画布</button>
-                  <button type="button" role="menuitem" className="danger" disabled={canvases.length === 1} onClick={() => { setCanvasActionsId(null); setDeleteCanvasId(canvas.id) }}><Trash2 size={14} />删除画布</button>
+                  <button type="button" role="menuitem" className="danger" onClick={() => { setCanvasActionsId(null); setDeleteCanvasId(canvas.id) }}><Trash2 size={14} />删除画布</button>
                 </div>}
               </div>
             ))}
           </div>
         </AnchoredPopover>
 
-        <aside className="left-rail" aria-label="画布功能">
+        <aside ref={leftRailRef} className="left-rail" aria-label="画布功能">
           <nav>{drawerItems.map((item) => <div key={item.key} className={item.separated ? 'rail-separated' : ''}>
             <button type="button" className={`ui-tooltip-control tooltip-right ${drawer === item.key ? 'active' : ''}`} data-tooltip={item.label} onClick={() => { setCanvasToolOpen(false); setQuickAdd(null); setDrawer((current) => current === item.key ? null : item.key) }} aria-label={item.label} aria-pressed={drawer === item.key}>{item.icon}{item.key === 'content' && activeTasks > 0 && <em>{activeTasks}</em>}</button>
-            {item.key === 'add' && <div className="canvas-tool-picker"><button type="button" className={`ui-tooltip-control tooltip-right ${canvasToolOpen ? 'active' : ''}`} data-tooltip={canvasTool === 'move' ? '移动工具 (V)' : '抓手工具 (H)'} onClick={() => { setDrawer(null); setCanvasToolOpen((open) => !open) }} aria-label={canvasTool === 'move' ? '移动工具' : '抓手工具'}>{canvasTool === 'move' ? <MousePointer2 size={19} /> : <Hand size={19} />}</button>{canvasToolOpen && <div role="menu" aria-label="画布工具"><button type="button" className={canvasTool === 'move' ? 'active' : ''} onClick={() => { setCanvasTool('move'); setCanvasToolOpen(false) }}><MousePointer2 size={16} /><span><strong>移动</strong><small>选择和移动节点</small></span><kbd>V</kbd></button><button type="button" className={canvasTool === 'hand' ? 'active' : ''} onClick={() => { setCanvasTool('hand'); setCanvasToolOpen(false) }}><Hand size={16} /><span><strong>抓手工具</strong><small>拖动画布视图</small></span><kbd>H</kbd></button></div>}</div>}
+            {item.key === 'add' && <div ref={canvasToolPickerRef} className="canvas-tool-picker"><button type="button" className={`ui-tooltip-control tooltip-right ${canvasToolOpen ? 'active' : ''}`} data-tooltip={canvasTool === 'move' ? '移动工具 (V)' : '抓手工具 (H)'} onClick={() => { setDrawer(null); setCanvasToolOpen((open) => !open) }} aria-label={canvasTool === 'move' ? '移动工具' : '抓手工具'}>{canvasTool === 'move' ? <MousePointer2 size={19} /> : <Hand size={19} />}</button>{canvasToolOpen && <div role="menu" aria-label="画布工具"><button type="button" className={canvasTool === 'move' ? 'active' : ''} onClick={() => { setCanvasTool('move'); setCanvasToolOpen(false) }}><MousePointer2 size={16} /><span><strong>移动</strong><small>选择和移动节点</small></span><kbd>V</kbd></button><button type="button" className={canvasTool === 'hand' ? 'active' : ''} onClick={() => { setCanvasTool('hand'); setCanvasToolOpen(false) }}><Hand size={16} /><span><strong>抓手工具</strong><small>拖动画布视图</small></span><kbd>H</kbd></button></div>}</div>}
           </div>)}</nav>
         </aside>
 
@@ -3999,6 +4475,7 @@ function CanvasPrototype() {
 
         <DrawerPanel
           active={drawer}
+          rootRef={drawerPanelRef}
           nodes={nodes}
           tasks={tasks}
           onClose={() => setDrawer(null)}
@@ -4168,8 +4645,8 @@ function CanvasPrototype() {
           if (isBlankCanvasTarget(event.target)) openQuickAdd(event.clientX, event.clientY)
         }}>
           {nodes.length === 0 && <section className="canvas-starter" data-canvas-overlay="true" aria-label="新建画布快速开始">
-            <strong>选择一个起点</strong>
-            <div>{starterExamples.map((example) => <button type="button" key={example.id} onClick={() => startFromExample(example.id)}><span className="starter-example-route"><i><MediaTypeIcon type={example.sourceType} size={16} /></i><ArrowRight size={13} /><i><MediaTypeIcon type={example.targetType} size={16} /></i></span><b>{example.label}</b></button>)}</div>
+            <header><strong>选择一个起点</strong><span>或双击画布自由创建节点</span></header>
+            <div>{starterExamples.map((example) => <button type="button" key={example.id} style={{ '--starter-artwork-position': example.artworkPosition } as CSSProperties} onClick={() => startFromExample(example.id)}><span className="starter-example-artwork" aria-hidden="true"><img src={example.artworkUrl} alt="" draggable="false" /></span><span className="starter-example-copy"><i><MediaTypeIcon type={example.iconType} size={16} /></i><b>{example.label}</b></span></button>)}</div>
           </section>}
           <ReactFlow<CanvasFlowNode, CanvasFlowEdge>
             nodes={renderedNodes}
@@ -4194,6 +4671,9 @@ function CanvasPrototype() {
               if (suppressPaneClickRef.current) return
               if (interactionMode?.kind === 'playlist-clips') setInteractionMode(null)
               setPlaylistSelection(null)
+              setDrawer(null)
+              setCanvasToolOpen(false)
+              setShareMenuOpen(false)
               setQuickAdd(null)
               setCanvasContextMenu(null)
               setContinuation(null)
@@ -4219,9 +4699,9 @@ function CanvasPrototype() {
             zoomOnDoubleClick={false}
             proOptions={{ hideAttribution: true }}
             defaultEdgeOptions={{ type: 'canvas', interactionWidth: 20 }}
-            connectionLineStyle={{ stroke: 'oklch(0.66 0.07 48)', strokeWidth: 1.75 }}
+            connectionLineStyle={{ stroke: 'oklch(0.66 0 0)', strokeWidth: 1.75 }}
           >
-            <Background variant={BackgroundVariant.Dots} gap={20} size={1.1} color="oklch(0.29 0.008 50 / 0.58)" />
+            <Background variant={BackgroundVariant.Dots} gap={20} size={1.1} color="oklch(0.29 0 0 / 0.58)" />
             <ViewportPortal>
               <div className="canvas-group-layer">
                 {groups.map((group) => {
@@ -4293,7 +4773,7 @@ function CanvasPrototype() {
                   : <i key={`${guide.axis}-${guide.position}-${index}`} className="alignment-guide guide-y" style={{ top: guide.position, left: guide.spanStart, width: guide.spanEnd - guide.spanStart }} />)}
               </div>
             </ViewportPortal>
-            {showMiniMap && <MiniMap className="canvas-minimap" pannable zoomable nodeColor={(node) => ({ text: '#696969', image: '#7b675b', video: '#876452', audio: '#4d6d65' }[node.type ?? 'text'] ?? '#696969')} maskColor="rgba(5,5,5,.72)" />}
+            {showMiniMap && <MiniMap className="canvas-minimap" pannable zoomable nodeColor={(node) => ({ text: '#696969', image: '#858585', video: '#979797', audio: '#777777' }[node.type ?? 'text'] ?? '#696969')} maskColor="rgba(5,5,5,.72)" />}
           </ReactFlow>
         </section>
 
@@ -4377,7 +4857,7 @@ function CanvasPrototype() {
         </div>
 
         <div className="prototype-note"><Sparkles size={14} /><span>V2.0.1 交互原型 · Mock 数据</span></div>
-        {toast && <div className={`toast ${toast.includes('\n') ? 'has-detail' : ''}`} role="status" aria-live="polite">{toast.includes('\n') ? <><Check size={18} /><span><strong>{toast.split('\n')[0]}</strong><small>{toast.split('\n')[1]}</small></span></> : /任务已进入队列|生成中|处理中|等待执行|^正在/.test(toast) ? <ShinyText text={toast} speed={1.8} color="#393638" shineColor="#ffffff" spread={92} /> : toast}</div>}
+        {toast && <div className={`toast ${toast.includes('\n') ? 'has-detail' : ''}`} role="status" aria-live="polite">{toast.includes('\n') ? <><Check size={18} /><span><strong>{toast.split('\n')[0]}</strong><small>{toast.split('\n')[1]}</small></span></> : /任务已进入队列|生成中|处理中|等待执行|^正在/.test(toast) ? <ShinyText text={toast} speed={1.8} color="#393939" shineColor="#ffffff" spread={92} /> : toast}</div>}
       </main>
     </CanvasActionContext.Provider>
   )

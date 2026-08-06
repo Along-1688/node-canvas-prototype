@@ -1,27 +1,48 @@
 .shiny-text {
-  position: relative;
-  display: inline-grid;
+  display: inline-block;
   color: var(--shiny-text-color);
   line-height: inherit;
+  background-image: linear-gradient(
+    var(--shiny-text-spread),
+    var(--shiny-text-color) 0%,
+    var(--shiny-text-color) 22%,
+    var(--shiny-text-highlight) 36%,
+    #ffffff 50%,
+    var(--shiny-text-highlight) 64%,
+    var(--shiny-text-color) 78%,
+    var(--shiny-text-color) 100%
+  );
+  background-size: 200% auto;
+  background-position: 150% center;
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  animation: shiny-text-sweep var(--shiny-text-speed) cubic-bezier(0.4, 0, 0.2, 1) var(--shiny-text-delay) infinite var(--shiny-text-direction);
+  filter: brightness(0.88);
+  will-change: background-position, filter;
 }
 
-.shiny-text > span { grid-area: 1 / 1; }
-
-.shiny-text-highlight {
-  color: var(--shiny-text-highlight);
-  pointer-events: none;
-  clip-path: polygon(122% 0, calc(122% - var(--shiny-text-band)) 0, calc(98% - var(--shiny-text-band)) 100%, 98% 100%);
-  animation: shiny-text-sweep var(--shiny-text-speed) linear var(--shiny-text-delay) infinite var(--shiny-text-direction) var(--shiny-text-cycle);
+.shiny-text.pause-on-hover:hover { animation-play-state: paused; }
+.shiny-text.is-disabled {
+  background-image: none;
+  -webkit-text-fill-color: currentColor;
+  animation: none;
+  will-change: auto;
 }
-
-.shiny-text.pause-on-hover:hover .shiny-text-highlight { animation-play-state: paused; }
-.shiny-text.is-disabled .shiny-text-highlight { display: none; }
 
 @keyframes shiny-text-sweep {
-  from { clip-path: polygon(122% 0, calc(122% - var(--shiny-text-band)) 0, calc(98% - var(--shiny-text-band)) 100%, 98% 100%); }
-  to { clip-path: polygon(2% 0, calc(2% - var(--shiny-text-band)) 0, calc(-22% - var(--shiny-text-band)) 100%, -22% 100%); }
+  from { background-position: 150% center; filter: brightness(0.88); }
+  42% { filter: brightness(1.02); }
+  50% { filter: brightness(1.32) drop-shadow(0 0 3px rgb(255 241 208 / 0.42)); }
+  58% { filter: brightness(1.02); }
+  to { background-position: -50% center; filter: brightness(0.88); }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .shiny-text-highlight { display: none; }
+  .shiny-text {
+    background-image: none;
+    -webkit-text-fill-color: currentColor;
+    animation: none;
+    will-change: auto;
+  }
 }

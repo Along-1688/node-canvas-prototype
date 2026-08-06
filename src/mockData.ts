@@ -8,11 +8,12 @@ import type {
   VideoModeOptionDefinition,
 } from './types'
 import { cloneMediaMetadata, HOST_VIDEO_MEDIA, imageMediaForVariant, LANDSCAPE_VIDEO_MEDIA } from './mediaMetadata'
+import { DEFAULT_TEXT_MODEL_ID, TEXT_MODEL_OPTIONS } from './textModelClient'
 
 export const videoModeOptions: VideoModeOptionDefinition[] = [
   { id: 'first-frame', label: '首帧', hint: '使用一张图片控制视频起始画面' },
   { id: 'first-last-frame', label: '首尾帧', hint: '使用两张图片控制起始与结束画面' },
-  { id: 'reference', label: '全能参考', hint: '综合参考画面、角色与风格' },
+  { id: 'reference', label: '全能生视频', hint: '综合参考画面、角色与风格' },
 ]
 
 export const videoModelCapabilities: VideoModelCapability[] = [
@@ -117,7 +118,11 @@ export const generationDefinitions: GenerationDefinition[] = [
   {
     nodeType: 'text',
     modes: [
-      { id: 'generate-copy', label: '文本生成', models: [{ id: 'gemini-flash-lite', label: 'Gemini 3.1 Flash Lite', parameters: [] }] },
+      {
+        id: 'generate-copy',
+        label: '文本生成',
+        models: TEXT_MODEL_OPTIONS.map((model) => ({ ...model, parameters: [] })),
+      },
     ],
   },
 ]
@@ -133,6 +138,8 @@ export const initialNodes: CanvasFlowNode[] = [
       status: 'ready',
       sourceKind: 'created',
       content: '傍晚的未来城市，樱花沿街盛开，潮湿路面映出暖色霓虹，画面安静、通透。',
+      modeId: 'generate-copy',
+      modelId: DEFAULT_TEXT_MODEL_ID,
       backgroundColor: 'default',
       textFormat: { block: 'body', bold: false, italic: false },
     },

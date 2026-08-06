@@ -45,9 +45,9 @@ function FlowingEdgeStrand({ path, edgeId, sourceX, sourceY, targetX, targetY }:
   return <>
     <defs>
       <linearGradient id={gradientId} gradientUnits="userSpaceOnUse" x1={sourceX} y1={sourceY} x2={targetX} y2={targetY}>
-        <stop offset="0%" stopColor="oklch(.82 .012 55)" />
-        <stop offset="30%" stopColor="oklch(.74 .026 54)" />
-        <stop offset="64%" stopColor="oklch(.69 .105 49)" />
+        <stop offset="0%" stopColor="oklch(.82 0 0)" />
+        <stop offset="30%" stopColor="oklch(.74 0 0)" />
+        <stop offset="64%" stopColor="oklch(.9 0 0)" />
         <stop offset="100%" stopColor="var(--brand-accent)" />
       </linearGradient>
     </defs>

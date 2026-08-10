@@ -70,7 +70,7 @@ import { edgeTypes } from './edges'
 import { AnchoredPopover, useDismissableLayer } from './floating'
 import { ImageEditorWorkspace } from './imageEditor'
 import { generationDefinitions, initialEdges, initialNodes, initialTasks } from './mockData'
-import { compatibleTextModelForReferences, PUBLIC_TEXT_MODEL_MOCK_ID, isTextModelId, requestTextModelCompletion, textModelLabel, TextModelRequestError, type TextModelId } from './textModelClient'
+import { compatibleTextModelForReferences, DEFAULT_TEXT_MODEL_ID, isTextModelId, requestTextModelCompletion, textModelLabel, TextModelRequestError, type TextModelId } from './textModelClient'
 import {
   buildGridSlices,
   buildPendingImageEditorData,
@@ -192,7 +192,7 @@ interface ContextAddState extends QuickAddState { targetNodeId: string }
 
 function textModelAdaptationNotice(target: CanvasFlowNode, incomingType: MediaNodeType): string | undefined {
   if (target.data.nodeType !== 'text' || (incomingType !== 'image' && incomingType !== 'video')) return undefined
-  const currentModelId = isTextModelId(target.data.modelId) ? target.data.modelId : PUBLIC_TEXT_MODEL_MOCK_ID
+  const currentModelId = isTextModelId(target.data.modelId) ? target.data.modelId : DEFAULT_TEXT_MODEL_ID
   const nextModelId = compatibleTextModelForReferences(currentModelId, [
     ...(target.data.references ?? []),
     { nodeType: incomingType },
@@ -389,7 +389,7 @@ function buildCanvasNode(
     mediaVariant: source === 'virtual-ip' ? 'ip' : type === 'image' ? 'dog' : type === 'audio' ? 'audio' : 'anime',
     localPrompt: created ? '' : undefined,
     modeId: type === 'video' ? 'reference' : type === 'text' ? 'generate-copy' : type === 'image' ? 'text-to-image' : type === 'audio' ? 'audio-generate' : undefined,
-    modelId: type === 'video' ? 'kling-o1' : type === 'text' ? PUBLIC_TEXT_MODEL_MOCK_ID : type === 'image' ? 'seedream-3' : type === 'audio' ? 'seed-audio-1' : undefined,
+    modelId: type === 'video' ? 'kling-o1' : type === 'text' ? DEFAULT_TEXT_MODEL_ID : type === 'image' ? 'seedream-3' : type === 'audio' ? 'seed-audio-1' : undefined,
     params: type === 'video' ? { ...defaultVideoGenerationParams() } : type === 'audio' ? { speed: 1, voiceId: 'elegant-senior', voiceLabel: '淡雅学姐' } : undefined,
     imageGeneration: type === 'image' ? structuredClone(DEFAULT_IMAGE_GENERATION) : undefined,
     cost: type === 'video' ? 35 : type === 'text' ? 1 : type === 'audio' ? 12 : type === 'image' ? 18 : undefined,
@@ -2375,7 +2375,7 @@ function CanvasPrototype() {
     if (!bypassValidation && references.length === 0 && !(node.data.localPrompt ?? '').trim()) return notify('请输入生成要求或添加参考')
 
     const textModelId = node.data.nodeType === 'text'
-      ? (isTextModelId(node.data.modelId) ? node.data.modelId : PUBLIC_TEXT_MODEL_MOCK_ID)
+      ? (isTextModelId(node.data.modelId) ? node.data.modelId : DEFAULT_TEXT_MODEL_ID)
       : undefined
     const taskId = `task-${Date.now()}`
     const task: GenerationTask = {
@@ -2415,7 +2415,7 @@ function CanvasPrototype() {
         canvasId,
         nodeId,
         taskId,
-        modelId: textModelId ?? PUBLIC_TEXT_MODEL_MOCK_ID,
+        modelId: textModelId ?? DEFAULT_TEXT_MODEL_ID,
         prompt: task.effectivePrompt,
         title: node.data.title,
       })

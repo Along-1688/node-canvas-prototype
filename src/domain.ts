@@ -7,6 +7,7 @@ import type {
   MediaNodeType,
   NodeReference,
 } from './types'
+import { compatibleTextModelForReferences } from './textModelClient'
 
 const targetMatrix: Record<MediaNodeType, MediaNodeType[]> = {
   text: ['text', 'image', 'video', 'audio'],
@@ -153,8 +154,11 @@ export function syncTargetReferences(
       const source = nodes.find((candidate) => candidate.id === edge.source)
       return source ? [referenceFromNode(source, edge.data?.inputRole ?? 'default')] : []
     })
-    if (JSON.stringify(node.data.references ?? []) === JSON.stringify(references)) return node
-    return { ...node, data: { ...node.data, references } }
+    const modelId = node.data.nodeType === 'text'
+      ? compatibleTextModelForReferences(node.data.modelId, references)
+      : node.data.modelId
+    if (JSON.stringify(node.data.references ?? []) === JSON.stringify(references) && modelId === node.data.modelId) return node
+    return { ...node, data: { ...node.data, references, modelId } }
   })
 }
 

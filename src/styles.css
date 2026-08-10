@@ -459,6 +459,29 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 .text-generation-config footer { min-height: 44px; border-top: 1px solid var(--line-soft); display: flex; align-items: center; gap: 6px; padding-top: 7px; }
 .text-generation-config select { height: 30px; max-width: 150px; border: 0; border-radius: 7px; background: var(--surface-2); color: var(--text-2); padding: 0 24px 0 8px; font-size: .625rem; }
 .text-generation-config select:nth-of-type(2) { max-width: 72px; }
+.text-model-trigger { min-width: 0; max-width: 172px; height: 30px; padding: 0 7px; border: 0; border-radius: 7px; background: var(--surface-2); color: var(--text-2); display: inline-flex; align-items: center; gap: 5px; cursor: pointer; }
+.text-model-trigger:hover, .text-model-trigger[aria-expanded="true"] { background: var(--surface-3); color: var(--text); }
+.text-model-trigger:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+.text-model-trigger > span { overflow: hidden; font-size: .625rem; text-overflow: ellipsis; white-space: nowrap; }
+.text-model-trigger > svg:last-child { flex: 0 0 auto; color: var(--text-3); }
+.text-model-popover { width: min(310px, calc(100vw - 24px)); padding: 7px; border: 1px solid var(--line); border-radius: 11px; background: oklch(0.145 0 0 / .995); box-shadow: 0 10px 24px oklch(0 0 0 / .4); }
+.text-model-popover header { min-height: 36px; padding: 2px 6px 7px; display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
+.text-model-popover header strong { font-size: .75rem; font-weight: 650; }
+.text-model-popover header small { color: var(--text-3); font-size: .5625rem; }
+.text-model-option { position: relative; border-radius: 8px; }
+.text-model-option > button { width: 100%; min-height: 50px; padding: 6px 8px; border: 0; border-radius: 8px; background: transparent; color: var(--text-2); display: grid; grid-template-columns: 32px minmax(0, 1fr) 16px; align-items: center; gap: 8px; text-align: left; cursor: pointer; }
+.text-model-option > button:hover, .text-model-option > button[aria-checked="true"] { background: var(--surface-2); color: var(--text); }
+.text-model-option > button:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
+.text-model-option > button:disabled { color: var(--text-3); cursor: not-allowed; opacity: .48; }
+.text-model-option > button:disabled:hover { background: transparent; }
+.text-model-logo { width: 30px; height: 30px; border-radius: 7px; background: var(--surface-2); display: grid; place-items: center; }
+.text-model-option > button > span:nth-child(2) { min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+.text-model-option strong, .text-model-option small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.text-model-option strong { font-size: .6875rem; }
+.text-model-option small { color: var(--text-3); font-size: .5625rem; }
+.text-model-option > button > svg { color: var(--accent-hover); }
+.text-model-option-tooltip { position: absolute; z-index: 2; left: calc(100% + 8px); top: 50%; width: max-content; max-width: 260px; padding: 6px 8px; border: 1px solid var(--line); border-radius: 7px; background: oklch(0.11 0 0 / .98); color: var(--text-2); box-shadow: 0 6px 18px oklch(0 0 0 / .35); font-size: .5625rem; line-height: 1.4; opacity: 0; pointer-events: none; transform: translateY(-50%) translateX(-3px); transition: opacity 120ms var(--ease-out), transform 120ms var(--ease-out); }
+.text-model-option.disabled:hover .text-model-option-tooltip, .text-model-option.disabled:focus-visible .text-model-option-tooltip { opacity: 1; transform: translateY(-50%) translateX(0); }
 .translate-text-action { width: 30px; height: 30px; border: 0; border-radius: 7px; background: transparent; color: var(--text-3); display: grid; place-items: center; cursor: pointer; }
 .translate-text-action:hover { background: var(--surface-2); color: var(--text); }
 .text-generation-config .generation-cost { margin-left: auto; }
@@ -4546,6 +4569,39 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
   cursor: pointer;
 }
 .canvas-home-create:hover { background: oklch(0.72 0.18 43); }
+.canvas-home-legacy {
+  min-height: 62px;
+  margin-bottom: 24px;
+  padding: 11px 12px 11px 15px;
+  border: 1px solid var(--line-soft);
+  border-radius: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  background: oklch(0.135 0 0);
+}
+.canvas-home-legacy-copy { min-width: 0; display: grid; gap: 3px; }
+.canvas-home-legacy-copy strong { color: var(--text); font-size: 13px; font-weight: 620; line-height: 18px; }
+.canvas-home-legacy-copy p { margin: 0; color: var(--text-2); font-size: 13px; line-height: 19px; }
+.canvas-home-legacy > a {
+  height: 34px;
+  padding: 0 11px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  background: var(--surface);
+  color: var(--text-2);
+  font-size: 12px;
+  font-weight: 590;
+  text-decoration: none;
+}
+.canvas-home-legacy > a:hover { border-color: oklch(0.44 0 0); background: var(--surface-2); color: var(--text); }
+.canvas-home-legacy > a:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .canvas-home-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(224px, 1fr)); gap: 16px; align-items: start; }
 .canvas-home-list-header { display: none; }
 .canvas-home-card {
@@ -4698,6 +4754,8 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
   .canvas-home-search { width: 100%; min-width: 0; flex: 1; }
   .canvas-home-view-toggle { flex: 0 0 auto; }
   .canvas-home-create { width: 38px; padding: 0; font-size: 0; flex: 0 0 38px; }
+  .canvas-home-legacy { padding: 12px; align-items: stretch; flex-direction: column; gap: 10px; }
+  .canvas-home-legacy > a { width: 100%; min-height: 40px; }
   .canvas-home-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
   .canvas-home-existing-card { grid-template-rows: minmax(0, 1fr) 54px; }
   .canvas-home-card-copy { height: 54px; padding: 8px 10px 9px; }
@@ -4720,5 +4778,5 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .canvas-home-card, .canvas-home-create, .canvas-home-card-rename, .canvas-space-chevron { transition: none; }
+  .canvas-home-card, .canvas-home-create, .canvas-home-card-rename, .canvas-home-legacy > a, .canvas-space-chevron { transition: none; }
 }

@@ -13,6 +13,7 @@ import type {
   VideoOperation,
   VideoOperationResult,
 } from './types'
+import type { TextModelId } from './textModelClient'
 
 export type CanvasInteractionMode =
   | { kind: 'reference'; targetNodeId: string; replaceEdgeId?: string; role?: GenerationReferenceRole }
@@ -22,6 +23,7 @@ export type CanvasInteractionMode =
 
 interface CanvasActions {
   updateNode: (nodeId: string, patch: Partial<CanvasNodeData>) => void
+  changeTextModel: (nodeId: string, modelId: TextModelId, localPrompt: string) => void
   renameNode: (nodeId: string, title: string) => void
   runGeneration: (nodeId: string) => void
   retryGeneration: (nodeId: string) => void

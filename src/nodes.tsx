@@ -88,7 +88,12 @@ import {
 import { generationDefinitions, videoModeOptions, videoModelCapabilities } from './mockData'
 import { fitMediaAspect, formatMediaResolution } from './mediaGeometry'
 import { parseTextContent } from './textContent'
-import { DEFAULT_TEXT_MODEL_ID } from './textModelClient'
+import {
+  DEFAULT_TEXT_MODEL_ID,
+  isTextModelId,
+  TEXT_MODEL_OPTIONS,
+  textModelUnsupportedReason,
+} from './textModelClient'
 import {
   mediaFileExtension,
   resolveVideoGenerationParams,
@@ -834,13 +839,15 @@ function TextToolbar({ id, data, onExpand, onClose, onToggleTextEditing, textEdi
 }
 
 export function TextGenerationConfig({ id, data }: { id: string; data: CanvasNodeData }) {
-  const { updateNode, runGeneration, notify, beginReferenceSelection } = useCanvasActions()
+  const { updateNode, changeTextModel, runGeneration, notify, beginReferenceSelection } = useCanvasActions()
   const definition = generationDefinitions.find((item) => item.nodeType === 'text')!
   const mode = definition.modes.find((item) => item.id === data.modeId) ?? definition.modes[0]
   const model = mode.models.find((item) => item.id === data.modelId)
     ?? mode.models.find((item) => item.id === DEFAULT_TEXT_MODEL_ID)
     ?? mode.models[0]
   const [promptDraft, setPromptDraft] = useState(data.localPrompt ?? '')
+  const [modelOpen, setModelOpen] = useState(false)
+  const modelButtonRef = useRef<HTMLButtonElement>(null)
   const composingPromptRef = useRef(false)
   const busy = data.status === 'queued' || data.status === 'running'
 
@@ -851,6 +858,11 @@ export function TextGenerationConfig({ id, data }: { id: string; data: CanvasNod
   const commitPrompt = useCallback((localPrompt: string) => {
     updateNode(id, { localPrompt, modeId: mode.id, modelId: model.id })
   }, [id, mode.id, model.id, updateNode])
+
+  const requestModelChange = useCallback((nextModelId: string) => {
+    if (!isTextModelId(nextModelId) || nextModelId === model.id) return
+    changeTextModel(id, nextModelId, promptDraft)
+  }, [changeTextModel, id, model.id, promptDraft])
 
   return (
     <section className="text-generation-config node-panel zoom-stable-ui nodrag nowheel" aria-label="文本生成配置">
@@ -878,7 +890,47 @@ export function TextGenerationConfig({ id, data }: { id: string; data: CanvasNod
         />
       </div>
       <footer>
-        <select aria-label="文本生成模型" value={model.id} onChange={(event) => updateNode(id, { localPrompt: promptDraft, modeId: mode.id, modelId: event.target.value })}>{mode.models.map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}</select>
+        <button
+          ref={modelButtonRef}
+          type="button"
+          className="text-model-trigger"
+          aria-label={`文本生成模型，当前 ${model.label}`}
+          aria-haspopup="menu"
+          aria-expanded={modelOpen}
+          onClick={() => setModelOpen((open) => !open)}
+        >
+          <Sparkles size={13} />
+          <span>{model.label}</span>
+          {modelOpen ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
+        </button>
+        <AnchoredPopover anchorRef={modelButtonRef} open={modelOpen} onClose={() => setModelOpen(false)} className="text-model-popover" align="start" placement="top">
+          <div role="menu" aria-label="选择文本生成模型">
+            <header><strong>选择模型</strong></header>
+            {mode.models.map((item) => {
+              const option = TEXT_MODEL_OPTIONS.find((candidate) => candidate.id === item.id)
+              const reason = textModelUnsupportedReason(item.id, data.references)
+              const tooltipId = `text-model-${id}-${item.id}-reason`
+              return (
+                <div key={item.id} className={`text-model-option${reason ? ' disabled' : ''}`} tabIndex={reason ? 0 : undefined}>
+                  <button
+                    type="button"
+                    role="menuitemradio"
+                    aria-label={`${item.label}，${option?.capabilityLabel ?? '文本生成模型'}`}
+                    aria-checked={model.id === item.id}
+                    aria-describedby={reason ? tooltipId : undefined}
+                    disabled={Boolean(reason)}
+                    onClick={() => { requestModelChange(item.id); setModelOpen(false) }}
+                  >
+                    <span className="text-model-logo"><Sparkles size={14} /></span>
+                    <span><strong>{item.label}</strong><small>{option?.capabilityLabel ?? '文本生成模型'}</small></span>
+                    {model.id === item.id && <Check size={14} />}
+                  </button>
+                  {reason && <span id={tooltipId} className="text-model-option-tooltip" role="tooltip">{reason}</span>}
+                </div>
+              )
+            })}
+          </div>
+        </AnchoredPopover>
         <span className="panel-spacer" />
         <button type="button" className="translate-text-action" onClick={() => notify('已翻译提示词（Mock）')} title="翻译提示词" aria-label="翻译提示词"><Languages size={15} /></button>
         <span className="generation-cost"><span className="chestnut-dot" />{data.cost ?? 1}</span>
@@ -1429,7 +1481,7 @@ function GeneratedImagePrompt({ id, data }: { id: string; data: CanvasNodeData }
       </div>
       <footer className="image-config-footer generation-config-footer">
         <button ref={modelButtonRef} type="button" className="image-config-trigger generation-config-trigger model-trigger" onClick={() => { setModelOpen((open) => !open); setParamsOpen(false); setStyleOpen(false); setCameraOpen(false); setAdvancedOpen(false) }} aria-expanded={modelOpen}><ImageIcon size={14} /><span>Seedream 3.0</span><ChevronDown size={12} /></button>
-        <AnchoredPopover anchorRef={modelButtonRef} open={modelOpen} onClose={() => setModelOpen(false)} className="video-model-popover image-model-popover" align="start" placement="top"><div role="menu" aria-label="选择图片模型"><header><strong>选择模型</strong><small>当前原型可用模型</small></header><button type="button" className="active" onClick={() => setModelOpen(false)}><span className="video-model-logo"><ImageIcon size={16} /></span><span><strong>Seedream 3.0</strong><small>通用图片生成与编辑</small></span><em>默认</em><Check size={15} /></button></div></AnchoredPopover>
+        <AnchoredPopover anchorRef={modelButtonRef} open={modelOpen} onClose={() => setModelOpen(false)} className="video-model-popover image-model-popover" align="start" placement="top"><div role="menu" aria-label="选择图片模型"><header><strong>选择模型</strong></header><button type="button" className="active" onClick={() => setModelOpen(false)}><span className="video-model-logo"><ImageIcon size={16} /></span><span><strong>Seedream 3.0</strong><small>通用图片生成与编辑</small></span><em>默认</em><Check size={15} /></button></div></AnchoredPopover>
         <button ref={paramsButtonRef} type="button" className="image-config-trigger generation-config-trigger params-trigger" onClick={() => { setParamsOpen((open) => !open); setModelOpen(false); setStyleOpen(false); setCameraOpen(false); setAdvancedOpen(false) }} aria-expanded={paramsOpen}><SlidersHorizontal size={14} /><span>{params.ratio === 'auto' ? '智能' : params.ratio} · {params.resolution} · {params.count}张</span><ChevronDown size={12} /></button>
         <AnchoredPopover anchorRef={paramsButtonRef} open={paramsOpen} onClose={() => setParamsOpen(false)} className="image-params-popover video-params-popover" align="start" placement="top"><div aria-label="图片生成参数"><fieldset><legend>选择比例</legend><div className="video-option-grid ratios image-ratio-options">{(['auto', '1:1', '9:16', '16:9', '3:2', '2:3', '3:4', '4:3', '21:9'] as const).map((ratio) => <button type="button" key={ratio} className={params.ratio === ratio ? 'active' : ''} onClick={() => setParams({ ratio })}><span className={`ratio-shape ratio-${ratio.replace(':', '-')}`} />{ratio === 'auto' ? '智能' : ratio}</button>)}</div></fieldset><fieldset><legend>选择分辨率</legend><div className="video-option-grid image-resolution-options">{(['1K', '2K', '4K'] as const).map((resolution) => <button type="button" key={resolution} className={params.resolution === resolution ? 'active' : ''} onClick={() => setParams({ resolution })}>{resolution}</button>)}</div></fieldset><fieldset><legend>选择生成数量</legend><div className="video-option-grid four">{([1, 2, 3, 4] as const).map((count) => <button type="button" key={count} className={params.count === count ? 'active' : ''} onClick={() => setParams({ count })}>{count}张</button>)}</div></fieldset></div></AnchoredPopover>
         <button ref={styleButtonRef} type="button" className="image-config-trigger generation-config-trigger style-trigger" onClick={() => { setStyleOpen((open) => !open); setModelOpen(false); setParamsOpen(false); setCameraOpen(false); setAdvancedOpen(false) }} aria-expanded={styleOpen}><Grid3X3 size={13} /><span>{params.stylePreset ? imageStylePresets.find((preset) => preset.id === params.stylePreset)?.name : '风格'}</span><ChevronDown size={12} /></button>
@@ -2066,7 +2118,7 @@ function VideoConfig({ id, data }: { id: string; data: CanvasNodeData }) {
       <footer className="video-config-footer generation-config-footer">
         <button ref={modelButtonRef} type="button" className="video-config-trigger generation-config-trigger model-trigger" onClick={() => { setModelOpen((open) => !open); setModeOpen(false); setParamsOpen(false) }} aria-expanded={modelOpen}><Film size={14} /><span>{model.label}</span><ChevronDown size={12} /></button>
         <AnchoredPopover anchorRef={modelButtonRef} open={modelOpen} onClose={() => setModelOpen(false)} className="video-model-popover" align="start" placement="top">
-          <div role="menu" aria-label="选择视频模型"><header><strong>选择模型</strong><small>按当前创作需要选择</small></header>{videoModelCapabilities.map((item) => <button type="button" key={item.id} className={model.id === item.id ? 'active' : ''} onClick={() => selectModel(item)}><span className="video-model-logo"><Film size={16} /></span><span><strong>{item.label}</strong><small>{item.hint}</small></span><em>{item.badge}</em>{model.id === item.id && <Check size={15} />}</button>)}</div>
+          <div role="menu" aria-label="选择视频模型"><header><strong>选择模型</strong></header>{videoModelCapabilities.map((item) => <button type="button" key={item.id} className={model.id === item.id ? 'active' : ''} onClick={() => selectModel(item)}><span className="video-model-logo"><Film size={16} /></span><span><strong>{item.label}</strong><small>{item.hint}</small></span><em>{item.badge}</em>{model.id === item.id && <Check size={15} />}</button>)}</div>
         </AnchoredPopover>
         <button ref={modeButtonRef} type="button" className="video-config-trigger generation-config-trigger mode-trigger" onClick={() => { setModeOpen((open) => !open); setModelOpen(false); setParamsOpen(false) }} aria-expanded={modeOpen}><span>{mode.label}</span><ChevronDown size={12} /></button>
         <AnchoredPopover anchorRef={modeButtonRef} open={modeOpen} onClose={() => setModeOpen(false)} className="video-mode-popover" align="start" placement="top"><div role="menu" aria-label="选择视频生成模式">{availableModes.map((item) => <button type="button" key={item.id} className={mode.id === item.id ? 'active' : ''} onClick={() => { actions.changeVideoGenerationMode(id, item.id); setModeOpen(false) }}><span><strong>{item.label}</strong><small>{item.hint}</small></span>{mode.id === item.id && <Check size={15} />}</button>)}</div></AnchoredPopover>

@@ -70,7 +70,7 @@ import { edgeTypes } from './edges'
 import { AnchoredPopover, useDismissableLayer } from './floating'
 import { ImageEditorWorkspace } from './imageEditor'
 import { generationDefinitions, initialEdges, initialNodes, initialTasks } from './mockData'
-import { PUBLIC_TEXT_MODEL_MOCK_ID, isTextModelId, requestTextModelCompletion, textModelLabel, TextModelRequestError } from './textModelClient'
+import { compatibleTextModelForReferences, PUBLIC_TEXT_MODEL_MOCK_ID, isTextModelId, requestTextModelCompletion, textModelLabel, TextModelRequestError, type TextModelId } from './textModelClient'
 import {
   buildGridSlices,
   buildPendingImageEditorData,
@@ -189,6 +189,18 @@ import type {
 interface QuickAddState { x: number; y: number; flowPosition: { x: number; y: number } }
 interface ContinuationState extends QuickAddState { sourceNodeId: string }
 interface ContextAddState extends QuickAddState { targetNodeId: string }
+
+function textModelAdaptationNotice(target: CanvasFlowNode, incomingType: MediaNodeType): string | undefined {
+  if (target.data.nodeType !== 'text' || (incomingType !== 'image' && incomingType !== 'video')) return undefined
+  const currentModelId = isTextModelId(target.data.modelId) ? target.data.modelId : PUBLIC_TEXT_MODEL_MOCK_ID
+  const nextModelId = compatibleTextModelForReferences(currentModelId, [
+    ...(target.data.references ?? []),
+    { nodeType: incomingType },
+  ])
+  if (nextModelId === currentModelId) return undefined
+  return `已切换为 ${textModelLabel(nextModelId)}，以支持${incomingType === 'image' ? '图片' : '视频'}输入`
+}
+
 interface ImageEditorState {
   canvasId: string
   editorNodeId: string
@@ -1211,6 +1223,8 @@ const canvasHomeSpaces: CanvasHomeSpace[] = [
   { id: 'ai-native', name: 'ai_native', meta: '普通成员 · 未设置部门', avatar: 'AI', tone: 'green' },
 ]
 
+const legacyCanvasUrl = 'https://aigc.mgtv.com/generation/canvas2d'
+
 export function CanvasHome({ projects, onCreate, onOpen, onRename, onDelete }: CanvasHomeProps) {
   const [query, setQuery] = useState('')
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid')
@@ -1328,6 +1342,17 @@ export function CanvasHome({ projects, onCreate, onOpen, onRename, onDelete }: C
           <button type="button" className="canvas-home-create" onClick={onCreate}><Plus size={17} />新建画布</button>
         </div>
       </header>
+
+      <section className="canvas-home-legacy" aria-label="旧版画布">
+        <div className="canvas-home-legacy-copy">
+          <strong>旧版画布</strong>
+          <p>旧版内容可在原画布中继续查看、编辑或下载。</p>
+        </div>
+        <a href={legacyCanvasUrl} target="_blank" rel="noreferrer" aria-label="打开原画布">
+          打开原画布
+          <ExternalLink size={15} aria-hidden="true" />
+        </a>
+      </section>
 
       <div className={`canvas-home-grid ${viewMode === 'list' ? 'is-list' : ''}`}>
         {viewMode === 'list' && <div className="canvas-home-list-header" aria-hidden="true"><span>预览</span><span>名称</span><span>创建时间</span><span>最近更新</span><span /></div>}
@@ -1813,6 +1838,20 @@ function CanvasPrototype() {
     patchCanvasNode(activeCanvasId, nodeId, patch)
   }, [activeCanvasId, patchCanvasNode])
 
+  const changeTextModel = useCallback((nodeId: string, modelId: TextModelId, localPrompt: string) => {
+    const current = nodesRef.current.find((node) => node.id === nodeId)
+    if (!current || current.data.nodeType !== 'text') return
+    if (current.data.modelId === modelId && (current.data.localPrompt ?? '') === localPrompt) return
+    saveHistory()
+    updateCanvas(activeCanvasId, (canvas) => {
+      const updatedNodes = updateNodeData(canvas.nodes, nodeId, { modelId, localPrompt })
+      return {
+        ...canvas,
+        nodes: syncTargetReferences(markNodesStale(updatedNodes, [nodeId]), canvas.edges),
+      }
+    })
+  }, [activeCanvasId, saveHistory, updateCanvas])
+
   const changeVideoGenerationMode = useCallback((nodeId: string, mode: VideoGenerationMode) => {
     const source = nodesRef.current.find((node) => node.id === nodeId)
     if (!source || source.data.nodeType !== 'video' || source.data.modeId === mode) return
@@ -1851,6 +1890,9 @@ function CanvasPrototype() {
     if (!validation.valid) return notify(validation.reason)
     const sourceNode = nodesRef.current.find((node) => node.id === normalized.source)
     const targetNode = nodesRef.current.find((node) => node.id === normalized.target)
+    const adaptationNotice = sourceNode && targetNode
+      ? textModelAdaptationNotice(targetNode, sourceNode.data.nodeType)
+      : undefined
     let inputRole: GenerationReferenceRole = 'default'
     if (sourceNode?.data.nodeType === 'image' && targetNode?.data.nodeType === 'video') {
       if (targetNode.data.modeId === 'first-frame') inputRole = 'first-frame'
@@ -1867,7 +1909,7 @@ function CanvasPrototype() {
         : canvas.nodes
       return { ...canvas, edges: nextEdges, nodes: syncTargetReferences(nextNodes, nextEdges) }
     })
-    notify('已添加生成参考')
+    notify(adaptationNotice ?? '已添加生成参考')
   }, [activeCanvasId, notify, saveHistory, updateCanvas])
 
   const onConnect = useCallback((connection: Connection) => {
@@ -1970,7 +2012,7 @@ function CanvasPrototype() {
     setContinuation(null)
     window.setTimeout(() => setCenter(target.position.x + 180, target.position.y + 210, { zoom: 0.88, duration: 260 }), 20)
     const label = { text: '文本', image: '图片', video: '视频', audio: '音频' }[targetType]
-    notify(`已引用源节点创建${label}节点`)
+    notify(textModelAdaptationNotice(target, source.data.nodeType) ?? `已引用源节点创建${label}节点`)
   }, [activeCanvasId, continuation, notify, saveHistory, setCenter, updateCanvas])
 
   const createContextSource = useCallback((sourceType: MediaNodeType) => {
@@ -2017,7 +2059,7 @@ function CanvasPrototype() {
     setContextAdd(null)
     window.setTimeout(() => setCenter((source.position.x + target.position.x) / 2 + 160, target.position.y + 120, { zoom: 0.88, duration: 260 }), 20)
     const label = { text: '文本', image: '图片', video: '视频', audio: '音频' }[sourceType]
-    notify(`已添加${label}上下文`)
+    notify(textModelAdaptationNotice(target, sourceType) ?? `已添加${label}上下文`)
   }, [activeCanvasId, contextAdd, notify, saveHistory, setCenter, updateCanvas])
 
   const exitInteractionMode = useCallback(() => setInteractionMode(null), [])
@@ -3454,7 +3496,8 @@ function CanvasPrototype() {
       })
       if (!fullVideoReference || interactionMode.replaceEdgeId) setInteractionMode(null)
       window.setTimeout(() => selectOnlyNode(target.id), 0)
-      notify(interactionMode.replaceEdgeId ? '已替换生成参考' : fullVideoReference ? '已加入全能参考，可继续选择' : '已添加生成参考')
+      notify(textModelAdaptationNotice(target, node.data.nodeType)
+        ?? (interactionMode.replaceEdgeId ? '已替换生成参考' : fullVideoReference ? '已加入全能参考，可继续选择' : '已添加生成参考'))
       return
     }
     if (interactionMode?.kind === 'marker') {
@@ -4323,6 +4366,7 @@ function CanvasPrototype() {
 
   const actions = useMemo(() => ({
     updateNode,
+    changeTextModel,
     renameNode,
     runGeneration: (nodeId: string) => startTask(nodeId),
     retryGeneration,
@@ -4362,7 +4406,7 @@ function CanvasPrototype() {
     videoEditAssets,
     seedanceComplianceAssets,
     notify,
-  }), [addPromptMarker, beginMarkerSelection, beginReferenceSelection, cancelPendingImageEditor, cancelPendingVideoOperation, changeVideoGenerationMode, completeImageEditor, completeImageUpscale, completeVideoEdit, completeVideoOperation, createAudioTrimDerivative, createImageDerivative, createLipSyncDerivative, deleteEdge, exitInteractionMode, hoveredPromptMarkerId, interactionMode, isConnectionTargetCandidate, isInteractionCandidate, markersForSource, notify, openContextAdd, openContinuation, openImageEditor, prepareImageEditor, prepareImageUpscale, prepareVideoOperation, regenerateImage, removeReference, renameNode, retryGeneration, seedanceComplianceAssets, selectedItemCount, startTask, updateNode, updatePromptMarker, uploadNodeMedia, videoEditAssets])
+  }), [addPromptMarker, beginMarkerSelection, beginReferenceSelection, cancelPendingImageEditor, cancelPendingVideoOperation, changeTextModel, changeVideoGenerationMode, completeImageEditor, completeImageUpscale, completeVideoEdit, completeVideoOperation, createAudioTrimDerivative, createImageDerivative, createLipSyncDerivative, deleteEdge, exitInteractionMode, hoveredPromptMarkerId, interactionMode, isConnectionTargetCandidate, isInteractionCandidate, markersForSource, notify, openContextAdd, openContinuation, openImageEditor, prepareImageEditor, prepareImageUpscale, prepareVideoOperation, regenerateImage, removeReference, renameNode, retryGeneration, seedanceComplianceAssets, selectedItemCount, startTask, updateNode, updatePromptMarker, uploadNodeMedia, videoEditAssets])
 
   const activeTasks = tasks.filter((task) => task.status === 'queued' || task.status === 'running').length
   const pinCounts = nodes.reduce<Record<PinColor, number>>((counts, node) => {

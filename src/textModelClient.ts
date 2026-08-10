@@ -1,6 +1,13 @@
 export const PUBLIC_TEXT_MODEL_MOCK_ID = 'text-generation-mock'
 export const DEFAULT_TEXT_MODEL_ID = PUBLIC_TEXT_MODEL_MOCK_ID
-export const TEXT_MODEL_OPTIONS = [{ id: PUBLIC_TEXT_MODEL_MOCK_ID, label: '文本生成 Mock' }] as const
+export const TEXT_MODEL_OPTIONS = [{
+  id: PUBLIC_TEXT_MODEL_MOCK_ID,
+  label: '文本生成 Mock',
+  supportedInputs: ['text', 'image', 'video'],
+  capabilityLabel: '支持图片、视频',
+}] as const
+
+export type TextModelId = (typeof TEXT_MODEL_OPTIONS)[number]['id']
 
 export interface TextModelCompletionRequest {
   tid: number
@@ -16,12 +23,33 @@ export interface TextModelCompletionResult {
 
 export class TextModelRequestError extends Error {}
 
-export function isTextModelId(value: string | undefined): boolean {
+export function isTextModelId(value: string | undefined): value is TextModelId {
   return value === PUBLIC_TEXT_MODEL_MOCK_ID
 }
 
 export function textModelLabel(_modelId?: string): string {
   return '文本生成 Mock'
+}
+
+export function textModelUnsupportedReferenceTypes(
+  _modelId: string | undefined,
+  _references: Array<{ nodeType: string }> = [],
+): Array<'image' | 'video'> {
+  return []
+}
+
+export function compatibleTextModelForReferences(
+  _currentModelId: string | undefined,
+  _references: Array<{ nodeType: string }> = [],
+): TextModelId {
+  return PUBLIC_TEXT_MODEL_MOCK_ID
+}
+
+export function textModelUnsupportedReason(
+  _modelId: string | undefined,
+  _references: Array<{ nodeType: string }> = [],
+): string | undefined {
+  return undefined
 }
 
 function buildMockContent(userPrompt: string) {

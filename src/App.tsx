@@ -36,6 +36,7 @@ import {
   GripHorizontal,
   Group,
   Hand,
+  ImageUp,
   Keyboard,
   Layers3,
   List,
@@ -105,6 +106,13 @@ import { MediaTypeIcon } from './mediaTypes'
 import { cloneMediaMetadata, HOST_VIDEO_MEDIA, imageMediaForVariant } from './mediaMetadata'
 import { batchMediaPosition } from './mediaGeometry'
 import {
+  attachGenerationResults,
+  buildImageGenerationResults,
+  buildVideoGenerationResults,
+  setGenerationResultFavorite as updateGenerationResultFavorite,
+  setPrimaryGenerationResult as selectPrimaryGenerationResult,
+} from './multiResult'
+import {
   addPlaylistClip,
   appendPlaylistClips,
   buildPlaylistComposition,
@@ -130,7 +138,6 @@ import {
 import { extractVideoTimelineFrames } from './videoFrameExtraction'
 import {
   buildVideoDerivativeData,
-  buildVideoBatchPlan,
   buildVideoResultData,
   buildVideoTaskSnapshot,
   canUseAsVideoReference,
@@ -441,6 +448,8 @@ function buildImageEditorNode(
       status: 'idle',
       mediaVariant: undefined,
       media: undefined,
+      generationResults: undefined,
+      primaryGenerationResultId: undefined,
       modeId: undefined,
       modelId: undefined,
       imageGeneration: undefined,
@@ -1156,16 +1165,24 @@ function initialWorkspace() {
   return { projects: [project], activeProjectId: project.id, openInCanvas: false }
 }
 
-function canvasCoverSource(canvas: CanvasDocument) {
+export function canvasCoverSource(canvas: CanvasDocument) {
   for (const node of canvas.nodes) {
+    if (node.data.nodeType !== 'image') continue
+    if (node.data.media?.url) return node.data.media.url
     if (node.data.media?.posterUrl) return node.data.media.posterUrl
-    if (node.data.nodeType === 'image') {
-      if (node.data.media?.url) return node.data.media.url
-      const fallback = imageMediaForVariant(node.data.mediaVariant)
-      if (fallback?.url) return fallback.url
-    }
+    const fallback = imageMediaForVariant(node.data.mediaVariant)
+    if (fallback?.url) return fallback.url
   }
   return undefined
+}
+
+function readImageFileAsDataUrl(file: File) {
+  return new Promise<string>((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = () => typeof reader.result === 'string' ? resolve(reader.result) : reject(new Error('invalid image result'))
+    reader.onerror = () => reject(reader.error ?? new Error('image read failed'))
+    reader.readAsDataURL(file)
+  })
 }
 
 function formatCanvasUpdatedAt(timestamp: number | undefined, now = Date.now()) {
@@ -1192,6 +1209,7 @@ function formatCanvasCreatedAt(timestamp: number | undefined) {
 }
 
 function CanvasCardCover({ project }: { project: CanvasProject }) {
+  if (project.cover?.mode === 'manual' && project.cover.imageUrl) return <img src={project.cover.imageUrl} alt="" />
   const canvas = canvasProjectActiveCanvas(project)
   if (!canvas) return <div className="canvas-card-placeholder" aria-hidden="true" />
   const src = canvasCoverSource(canvas)
@@ -1204,6 +1222,7 @@ interface CanvasHomeProps {
   onCreate: () => void
   onOpen: (projectId: string) => void
   onRename: (projectId: string, name: string) => void
+  onChangeCover: (projectId: string, file: File) => void
   onDelete: (projectIds: string[]) => void
 }
 
@@ -1225,7 +1244,7 @@ const canvasHomeSpaces: CanvasHomeSpace[] = [
 
 const legacyCanvasUrl = 'https://aigc.mgtv.com/generation/canvas2d'
 
-export function CanvasHome({ projects, onCreate, onOpen, onRename, onDelete }: CanvasHomeProps) {
+export function CanvasHome({ projects, onCreate, onOpen, onRename, onChangeCover, onDelete }: CanvasHomeProps) {
   const [query, setQuery] = useState('')
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid')
   const [activeSpaceId, setActiveSpaceId] = useState('personal')
@@ -1239,6 +1258,8 @@ export function CanvasHome({ projects, onCreate, onOpen, onRename, onDelete }: C
   const spaceTriggerRef = useRef<HTMLButtonElement>(null)
   const activeProjectMenuTriggerRef = useRef<HTMLButtonElement>(null)
   const activeProjectMenuRef = useRef<HTMLDivElement>(null)
+  const coverUploadInputRef = useRef<HTMLInputElement>(null)
+  const coverUploadProjectIdRef = useRef<string | null>(null)
   const activeSpace = canvasHomeSpaces.find((space) => space.id === activeSpaceId) ?? canvasHomeSpaces[0]
   const canvasHomeTitle = '我的画布'
   const normalizedQuery = query.trim().toLocaleLowerCase()
@@ -1258,10 +1279,9 @@ export function CanvasHome({ projects, onCreate, onOpen, onRename, onDelete }: C
       : [...current, projectId])
   }
 
-  const enterSelectionMode = (projectId: string) => {
+  const enterSelectionMode = () => {
     setMenuProjectId(null)
     setSelectionMode(true)
-    setSelectedProjectIds((current) => current.includes(projectId) ? current : [...current, projectId])
   }
 
   const exitSelectionMode = () => {
@@ -1285,6 +1305,19 @@ export function CanvasHome({ projects, onCreate, onOpen, onRename, onDelete }: C
     const name = renameDraft.trim()
     if (name) onRename(renameProjectId, name)
     cancelRename()
+  }
+
+  const startCoverUpload = (projectId: string) => {
+    setMenuProjectId(null)
+    coverUploadProjectIdRef.current = projectId
+    coverUploadInputRef.current?.click()
+  }
+
+  const handleCoverUpload = (file: File | undefined) => {
+    const projectId = coverUploadProjectIdRef.current
+    coverUploadProjectIdRef.current = null
+    if (!file || !projectId) return
+    onChangeCover(projectId, file)
   }
 
   const confirmDelete = () => {
@@ -1335,6 +1368,9 @@ export function CanvasHome({ projects, onCreate, onOpen, onRename, onDelete }: C
         <div><h1>{canvasHomeTitle}</h1></div>
         <div className="canvas-home-actions">
           <label className="canvas-home-search"><Search size={17} /><span className="sr-only">搜索画布</span><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="搜索画布" /></label>
+          <button type="button" className={`canvas-home-select ${selectionMode ? 'is-active' : ''}`} onClick={() => selectionMode ? exitSelectionMode() : enterSelectionMode()} aria-label={selectionMode ? '完成选择' : '批量选择画布'} aria-pressed={selectionMode}>
+            <Check size={16} aria-hidden="true" /><span>{selectionMode ? '完成' : '选择'}</span>
+          </button>
           <div className="canvas-home-view-toggle" role="group" aria-label="画布排列方式">
             <button type="button" onClick={() => setViewMode('grid')} aria-label="切换为网格视图" aria-pressed={viewMode === 'grid'} title="网格视图"><Grid3X3 size={16} /></button>
             <button type="button" onClick={() => setViewMode('list')} aria-label="切换为列表视图" aria-pressed={viewMode === 'list'} title="列表视图"><List size={17} /></button>
@@ -1385,9 +1421,8 @@ export function CanvasHome({ projects, onCreate, onOpen, onRename, onDelete }: C
             {selectionMode ? <button type="button" className="canvas-home-checkbox" onClick={() => toggleProjectSelection(project.id)} aria-label={`${selected ? '取消选择' : '选择'}${project.name}`} aria-pressed={selected}>{selected && <Check size={15} />}</button> : <>
               <button ref={menuProjectId === project.id ? activeProjectMenuTriggerRef : undefined} type="button" className="canvas-home-card-more" onClick={() => setMenuProjectId((current) => current === project.id ? null : project.id)} aria-label={`管理${project.name}`} aria-haspopup="menu" aria-expanded={menuProjectId === project.id}><Ellipsis size={19} /></button>
               {menuProjectId === project.id && <div ref={activeProjectMenuRef} className="canvas-home-card-menu" role="menu" aria-label={`${project.name}操作`}>
-                <button type="button" role="menuitem" onClick={() => { setMenuProjectId(null); onOpen(project.id) }}><FolderOpen size={16} />打开</button>
                 <button type="button" role="menuitem" onClick={() => startRename(project)}><Pencil size={16} />重命名</button>
-                <button type="button" role="menuitem" onClick={() => enterSelectionMode(project.id)}><Check size={16} />选择</button>
+                <button type="button" role="menuitem" onClick={() => startCoverUpload(project.id)}><ImageUp size={16} />修改封面</button>
                 <span className="canvas-home-menu-divider" />
                 <button type="button" role="menuitem" className="danger" onClick={() => { setMenuProjectId(null); setPendingDeleteIds([project.id]) }}><Trash2 size={16} />删除</button>
               </div>}
@@ -1397,6 +1432,8 @@ export function CanvasHome({ projects, onCreate, onOpen, onRename, onDelete }: C
         {normalizedQuery && !visibleProjects.length && <p className="canvas-home-empty-search">未找到匹配的画布</p>}
       </div>
     </section>
+
+    <input ref={coverUploadInputRef} hidden type="file" accept="image/*" aria-label="选择画布封面图片" onChange={(event) => { handleCoverUpload(event.currentTarget.files?.[0]); event.currentTarget.value = '' }} />
 
     {selectionMode && <div className="canvas-home-selection-bar" role="toolbar" aria-label="批量管理画布"><button type="button" aria-label="退出选择" onClick={exitSelectionMode}><X size={18} /></button><strong>已选择 {selectedProjectIds.length} 个画布</strong><button type="button" className="canvas-home-bulk-delete" disabled={!selectedProjectIds.length} onClick={() => setPendingDeleteIds(selectedProjectIds)} aria-label="删除已选画布"><Trash2 size={18} /></button></div>}
 
@@ -1433,6 +1470,7 @@ function CanvasPrototype() {
   const [hoveredPromptMarkerId, setHoveredPromptMarkerId] = useState<string | null>(null)
   const [marquee, setMarquee] = useState<MarqueeState | null>(null)
   const [spacePanning, setSpacePanning] = useState(false)
+  const [canvasPaneClickVersion, setCanvasPaneClickVersion] = useState(0)
   const [sessionAssets, setSessionAssets] = useState<SessionAsset[]>([])
   const [assetFolders] = useState<AssetFolder[]>([
     { id: 'uncategorized', name: '未分类' },
@@ -1755,9 +1793,10 @@ function CanvasPrototype() {
               ? { ...node, data: buildVideoDerivativeData(source.data, task.videoOperation, source.data.media) }
               : node
           }
-          return task.videoGeneration
-            ? { ...node, data: buildVideoResultData(node.data, DEFAULT_VIDEO_MEDIA, { params: task.videoGeneration }) }
-            : node
+          if (!task.videoGeneration) return node
+          const results = buildVideoGenerationResults(task.videoGeneration.count, task.id, DEFAULT_VIDEO_MEDIA)
+          const completed = buildVideoResultData(node.data, results[0].media, { params: task.videoGeneration })
+          return { ...node, data: attachGenerationResults(completed, results) }
         })
         const completedTaskIds = new Set(activeTasks.map((task) => task.id))
         return {
@@ -1837,6 +1876,37 @@ function CanvasPrototype() {
   const updateNode = useCallback((nodeId: string, patch: Partial<CanvasNodeData>) => {
     patchCanvasNode(activeCanvasId, nodeId, patch)
   }, [activeCanvasId, patchCanvasNode])
+
+  const setPrimaryGenerationResult = useCallback((nodeId: string, resultId: string) => {
+    const source = nodesRef.current.find((node) => node.id === nodeId)
+    if (!source || source.data.primaryGenerationResultId === resultId) return
+    const updatedData = selectPrimaryGenerationResult(source.data, resultId)
+    if (updatedData === source.data) return
+    saveHistory()
+    updateCanvas(activeCanvasId, (canvas) => {
+      const updatedNodes = canvas.nodes.map((node) => node.id === nodeId
+        ? { ...node, data: updatedData }
+        : node)
+      return {
+        ...canvas,
+        nodes: syncTargetReferences(markDirectDependentsStale(updatedNodes, canvas.edges, [nodeId]), canvas.edges),
+      }
+    })
+    notify(source.data.nodeType === 'video' ? '已设为主视频，下游输入已更新' : '已设为主图，下游输入已更新')
+  }, [activeCanvasId, notify, saveHistory, updateCanvas])
+
+  const setGenerationResultFavorite = useCallback((nodeId: string, resultId: string, favorite: boolean) => {
+    const source = nodesRef.current.find((node) => node.id === nodeId)
+    if (!source) return
+    const updatedData = updateGenerationResultFavorite(source.data, resultId, favorite)
+    if (updatedData === source.data) return
+    saveHistory()
+    updateCanvas(activeCanvasId, (canvas) => ({
+      ...canvas,
+      nodes: canvas.nodes.map((node) => node.id === nodeId ? { ...node, data: updatedData } : node),
+    }))
+    notify(favorite ? '已收藏到资产' : '已取消收藏')
+  }, [activeCanvasId, notify, saveHistory, updateCanvas])
 
   const changeTextModel = useCallback((nodeId: string, modelId: TextModelId, localPrompt: string) => {
     const current = nodesRef.current.find((node) => node.id === nodeId)
@@ -2168,131 +2238,87 @@ function CanvasPrototype() {
 
     saveHistory()
     const createdAt = Date.now()
-    // Prompt 重新生成属于同一内容节点的新结果，始终保留节点 ID 与既有关系线。
-    const fillsCurrentNode = true
-    const incoming = canvas.edges.filter((edge) => edge.target === nodeId && edge.data?.relationType === 'generation-input')
-    const createdNodes: CanvasFlowNode[] = []
-    const createdEdges: CanvasFlowEdge[] = []
-    const createdTasks: GenerationTask[] = []
-    const outputNodeIds: string[] = []
     const count = snapshot.videoGeneration.count
-
-    const batchPlan = buildVideoBatchPlan(source.id, count, fillsCurrentNode, String(createdAt))
-    for (const output of batchPlan) {
-      const { index, usesCurrentNode, outputNodeId: outputId } = output
-      const outputTitle = usesCurrentNode
-        ? source.data.title
-        : `${source.data.title} · 新版本${count > 1 ? ` ${index + 1}` : ''}`
-      const outputData: CanvasNodeData = {
-        ...structuredClone(source.data),
-        title: outputTitle,
-        status: 'queued',
-        sourceKind: 'generated',
-        progress: 0,
-        error: undefined,
-        content: usesCurrentNode ? source.data.content : '',
-        media: undefined,
-        favorite: false,
-        videoOperation: undefined,
-        videoGeneration: structuredClone(snapshot.videoGeneration),
-        params: structuredClone(snapshot.params),
-        references: usesCurrentNode ? structuredClone(source.data.references ?? []) : [],
-      }
-      outputNodeIds.push(outputId)
-      if (!usesCurrentNode) {
-        const positionIndex = fillsCurrentNode ? index - 1 : index
-        createdNodes.push({
-          id: outputId,
-          type: 'video',
-          position: {
-            x: source.position.x + 520 + Math.floor(positionIndex / 2) * 500,
-            y: source.position.y + (positionIndex % 2) * 360,
-          },
-          selected: index === 0,
-          data: outputData,
-        })
-        incoming.forEach((edge) => createdEdges.push({
-          ...structuredClone(edge),
-          id: `${edge.id}-${outputId}`,
-          target: outputId,
-          selected: false,
-        }))
-      }
-      createdTasks.push({
-        id: output.taskId,
-        canvasId,
-        nodeId: outputId,
-        nodeTitle: outputTitle,
-        nodeType: 'video',
-        status: 'queued',
-        progress: 0,
-        effectivePrompt: snapshot.effectivePrompt,
-        inputReferenceIds: snapshot.inputReferenceIds,
-        inputAssetIds: snapshot.inputAssetIds,
-        inputReferences: snapshot.inputReferences,
-        promptAssets: snapshot.promptAssets,
-        videoGeneration: structuredClone(snapshot.videoGeneration),
-        modeId: snapshot.modeId,
-        modelId: snapshot.modelId,
-        params: structuredClone(snapshot.params),
-        outputNodeIds: output.outputNodeIds,
-        modelLabel: videoModelLabel(snapshot.modelId),
-        cost: source.data.cost ?? 35,
-        createdAt: new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }),
-      })
+    const taskId = `task-${createdAt}`
+    const task: GenerationTask = {
+      id: taskId,
+      canvasId,
+      nodeId: source.id,
+      nodeTitle: source.data.title,
+      nodeType: 'video',
+      status: 'queued',
+      progress: 0,
+      effectivePrompt: snapshot.effectivePrompt,
+      inputReferenceIds: snapshot.inputReferenceIds,
+      inputAssetIds: snapshot.inputAssetIds,
+      inputReferences: snapshot.inputReferences,
+      promptAssets: snapshot.promptAssets,
+      videoGeneration: structuredClone(snapshot.videoGeneration),
+      modeId: snapshot.modeId,
+      modelId: snapshot.modelId,
+      params: structuredClone(snapshot.params),
+      outputNodeIds: [source.id],
+      modelLabel: videoModelLabel(snapshot.modelId),
+      cost: (source.data.cost ?? 35) * count,
+      createdAt: new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }),
     }
     updateCanvas(canvasId, (current) => {
-      const nextEdges = [...current.edges.map((edge) => ({ ...edge, selected: false })), ...createdEdges]
-      const existingNodes = current.nodes.map((node) => node.id === source.id && fillsCurrentNode
-        ? { ...node, selected: true, data: createdTasks[0] ? {
+      const nextEdges = current.edges.map((edge) => ({ ...edge, selected: false }))
+      const existingNodes = current.nodes.map((node) => node.id === source.id
+        ? { ...node, selected: true, data: {
           ...structuredClone(source.data),
           status: 'queued' as const,
           sourceKind: 'generated' as const,
           progress: 0,
           error: undefined,
           media: undefined,
+          generationResults: undefined,
+          primaryGenerationResultId: undefined,
           videoGeneration: structuredClone(snapshot.videoGeneration),
           params: structuredClone(snapshot.params),
-        } : node.data }
+        } }
         : { ...node, selected: false })
       return {
         ...current,
         edges: nextEdges,
-        nodes: syncTargetReferences([...existingNodes, ...createdNodes], nextEdges),
-        tasks: [...createdTasks, ...current.tasks],
+        nodes: syncTargetReferences(existingNodes, nextEdges),
+        tasks: [task, ...current.tasks],
       }
     })
-    notify(`已创建 ${count} 个视频生成任务`)
+    notify(`视频生成任务已进入队列，将生成 ${count} 个结果`)
 
-    const taskIds = new Set(createdTasks.map((task) => task.id))
-    const nodeIds = new Set(outputNodeIds)
     const hasActiveBatch = () => Boolean(canvasesRef.current.find((item) => item.id === canvasId)?.tasks
-      .some((task) => taskIds.has(task.id) && (task.status === 'queued' || task.status === 'running')))
+      .some((item) => item.id === taskId && (item.status === 'queued' || item.status === 'running')))
     const updateBatch = (status: GenerationTask['status'], progress: number) => updateCanvas(canvasId, (current) => ({
       ...current,
-      nodes: current.nodes.map((node) => nodeIds.has(node.id) && current.tasks.some((task) => taskIds.has(task.id) && task.nodeId === node.id && (task.status === 'queued' || task.status === 'running'))
+      nodes: current.nodes.map((node) => node.id === source.id
         ? { ...node, data: { ...node.data, status, progress } }
         : node),
-      tasks: current.tasks.map((task) => taskIds.has(task.id) && (task.status === 'queued' || task.status === 'running') ? { ...task, status, progress } : task),
+      tasks: current.tasks.map((item) => item.id === taskId && (item.status === 'queued' || item.status === 'running') ? { ...item, status, progress } : item),
     }))
     taskTimers.current.push(window.setTimeout(() => { if (hasActiveBatch()) updateBatch('running', 28) }, 420))
     taskTimers.current.push(window.setTimeout(() => { if (hasActiveBatch()) updateBatch('running', 72) }, 1150))
     taskTimers.current.push(window.setTimeout(() => {
       if (!hasActiveBatch()) return
-      updateCanvas(canvasId, (current) => ({
-        ...current,
-        nodes: syncTargetReferences(markDirectDependentsStale(current.nodes.map((node) => nodeIds.has(node.id) && current.tasks.some((task) => taskIds.has(task.id) && task.nodeId === node.id && (task.status === 'queued' || task.status === 'running'))
-          ? { ...node, data: buildVideoResultData(node.data, DEFAULT_VIDEO_MEDIA, { params: snapshot.videoGeneration }) }
-          : node), current.edges, [source.id]), current.edges),
-        tasks: current.tasks.map((task) => taskIds.has(task.id) && (task.status === 'queued' || task.status === 'running')
-          ? { ...task, status: 'success', progress: 100, outputMedia: { ...DEFAULT_VIDEO_MEDIA } }
-          : task),
-      }))
+      updateCanvas(canvasId, (current) => {
+        const results = buildVideoGenerationResults(count, String(createdAt), DEFAULT_VIDEO_MEDIA)
+        const completedNodes = current.nodes.map((node) => {
+          if (node.id !== source.id) return node
+          const completed = buildVideoResultData(node.data, results[0].media, { params: snapshot.videoGeneration })
+          return { ...node, data: attachGenerationResults(completed, results) }
+        })
+        return {
+          ...current,
+          nodes: syncTargetReferences(markDirectDependentsStale(completedNodes, current.edges, [source.id]), current.edges),
+          tasks: current.tasks.map((item) => item.id === taskId && (item.status === 'queued' || item.status === 'running')
+            ? { ...item, status: 'success', progress: 100, outputMedia: { ...results[0].media } }
+            : item),
+        }
+      })
       if (activeCanvasIdRef.current === canvasId) notify(`${count} 个视频结果已生成`)
     }, 2200))
 
-    const focus = fillsCurrentNode ? source : createdNodes[0]
-    if (focus) window.setTimeout(() => setCenter(focus.position.x + 220, focus.position.y + 330, { zoom: 0.78, duration: 300 }), 20)
+    window.setTimeout(() => setCenter(source.position.x + 220, source.position.y + 330, { zoom: 0.78, duration: 300 }), 20)
   }, [activeCanvasId, notify, saveHistory, setCenter, updateCanvas])
 
   const startTextModelTask = useCallback(async ({ canvasId, nodeId, taskId, modelId, prompt, title }: {
@@ -2391,6 +2417,7 @@ function CanvasPrototype() {
       inputReferences: structuredClone(references),
       promptMarkers: structuredClone(node.data.promptMarkers ?? []),
       imageGeneration: node.data.imageGeneration ? structuredClone(node.data.imageGeneration) : undefined,
+      outputNodeIds: [nodeId],
       modeId: node.data.modeId,
       modelId: textModelId ?? node.data.modelId,
       modelLabel: node.data.nodeType === 'text'
@@ -2400,7 +2427,8 @@ function CanvasPrototype() {
           : node.data.nodeType === 'audio'
             ? audioModelLabel(node.data.modelId)
             : '示例模型',
-      cost: node.data.cost ?? (node.data.nodeType === 'text' ? 1 : 35),
+      cost: (node.data.cost ?? (node.data.nodeType === 'text' ? 1 : 35))
+        * (node.data.nodeType === 'image' ? node.data.imageGeneration?.count ?? 1 : 1),
       createdAt: new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }),
     }
     updateCanvas(canvasId, (current) => ({
@@ -2444,42 +2472,32 @@ function CanvasPrototype() {
               audio: '生成的音频结果',
             }[currentNode.data.nodeType]
         const prompt = (currentNode.data.localPrompt ?? '').trim()
+        const baseCompletedData: CanvasNodeData = {
+          ...currentNode.data,
+          status: 'success', progress: 100, sourceKind: 'generated', content: generatedContent,
+          mediaVariant: currentNode.data.nodeType === 'image' ? 'anime' : currentNode.data.mediaVariant,
+          media: currentNode.data.nodeType === 'image' ? imageMediaForVariant('anime') : currentNode.data.media,
+          staleNoticeDismissed: undefined,
+          promptHistory: currentNode.data.nodeType === 'image' && prompt
+            ? [prompt, ...(currentNode.data.promptHistory ?? []).filter((item) => item !== prompt)]
+            : currentNode.data.promptHistory,
+        }
+        const resultCount = currentNode.data.nodeType === 'image' ? currentNode.data.imageGeneration?.count ?? 1 : 1
+        const completedData = currentNode.data.nodeType === 'image'
+          ? attachGenerationResults(baseCompletedData, buildImageGenerationResults(resultCount, taskId, generatedContent))
+          : baseCompletedData
         const updatedNode: CanvasFlowNode = {
           ...currentNode,
-          data: {
-            ...currentNode.data,
-            status: 'success', progress: 100, sourceKind: 'generated', content: generatedContent,
-            mediaVariant: currentNode.data.nodeType === 'image' ? 'anime' : currentNode.data.mediaVariant,
-            media: currentNode.data.nodeType === 'image' ? imageMediaForVariant('anime') : currentNode.data.media,
-            staleNoticeDismissed: undefined,
-            promptHistory: currentNode.data.nodeType === 'image' && prompt
-              ? [prompt, ...(currentNode.data.promptHistory ?? []).filter((item) => item !== prompt)]
-              : currentNode.data.promptHistory,
-          },
+          data: completedData,
         }
-        let nextNodes = current.nodes.map((item) => item.id === nodeId ? updatedNode : item)
-        let nextEdges = current.edges
-        const extraTasks: GenerationTask[] = []
-        const count = currentNode.data.nodeType === 'image' ? currentNode.data.imageGeneration?.count ?? 1 : 1
-        if (count > 1) {
-          const incoming = current.edges.filter((edge) => edge.target === nodeId && edge.data?.relationType === 'generation-input')
-          for (let index = 1; index < count; index += 1) {
-            const copyId = `${nodeId}-result-${Date.now()}-${index}`
-            nextNodes.push({
-              ...structuredClone(updatedNode), id: copyId, selected: false,
-              position: { x: updatedNode.position.x + 430 * index, y: updatedNode.position.y + (index % 2) * 42 },
-              data: { ...structuredClone(updatedNode.data), title: `${updatedNode.data.title} ${index + 1}` },
-            })
-            nextEdges = [...nextEdges, ...incoming.map((edge) => ({ ...structuredClone(edge), id: `${edge.id}-${copyId}`, target: copyId, selected: false }))]
-            extraTasks.push({ ...task, id: `${taskId}-${index}`, nodeId: copyId, nodeTitle: `${updatedNode.data.title} ${index + 1}`, status: 'success', progress: 100 })
-          }
-        }
-        const nodesWithStaleDirectDependents = markDirectDependentsStale(nextNodes, nextEdges, [nodeId])
+        const nextNodes = current.nodes.map((item) => item.id === nodeId ? updatedNode : item)
+        const nodesWithStaleDirectDependents = markDirectDependentsStale(nextNodes, current.edges, [nodeId])
         return {
           ...current,
-          nodes: syncTargetReferences(nodesWithStaleDirectDependents, nextEdges),
-          edges: nextEdges,
-          tasks: current.tasks.map((item): GenerationTask => item.id === taskId ? { ...item, status: 'success', progress: 100 } : item).concat(extraTasks),
+          nodes: syncTargetReferences(nodesWithStaleDirectDependents, current.edges),
+          tasks: current.tasks.map((item): GenerationTask => item.id === taskId
+            ? { ...item, status: 'success', progress: 100, outputMedia: completedData.media ? { ...completedData.media } : undefined }
+            : item),
         }
       })
       if (activeCanvasIdRef.current === canvasId) notify(`${node.data.title}生成完成`)
@@ -2839,6 +2857,8 @@ function CanvasPrototype() {
       content: '',
       mediaVariant: undefined,
       media: undefined,
+      generationResults: undefined,
+      primaryGenerationResultId: undefined,
       favorite: false,
       localPrompt: nextPrompt,
       promptHistory: historyItems,
@@ -2858,8 +2878,9 @@ function CanvasPrototype() {
       inputReferenceIds: sourceReferences.map((reference) => reference.nodeId),
       promptMarkers: structuredClone(source.data.promptMarkers ?? []),
       imageGeneration: structuredClone(params),
+      outputNodeIds: [nodeId],
       modelLabel: 'Seedream 3.0',
-      cost: 18,
+      cost: 18 * params.count,
       createdAt: new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }),
     }
     updateCanvas(canvasId, (canvas) => ({
@@ -2887,25 +2908,28 @@ function CanvasPrototype() {
     taskTimers.current.push(window.setTimeout(() => {
       if (!taskIsActive()) return
       updateCanvas(canvasId, (canvas) => {
-        const completedNodes: CanvasFlowNode[] = canvas.nodes.map((node): CanvasFlowNode => node.id === nodeId
-          ? {
-              ...node,
-              data: {
-                ...node.data,
-                status: 'success' as const,
-                progress: 100,
-                content: '根据 Prompt 生成的图片结果',
-                mediaVariant: 'anime' as const,
-                media: imageMediaForVariant('anime'),
-                staleNoticeDismissed: undefined,
-              },
-            }
-          : node)
+        let outputMedia = imageMediaForVariant('anime')
+        const completedNodes: CanvasFlowNode[] = canvas.nodes.map((node): CanvasFlowNode => {
+          if (node.id !== nodeId) return node
+          const content = '根据 Prompt 生成的图片结果'
+          const results = buildImageGenerationResults(params.count, taskId, content)
+          const completed = attachGenerationResults({
+            ...node.data,
+            status: 'success' as const,
+            progress: 100,
+            content,
+            mediaVariant: 'anime' as const,
+            media: imageMediaForVariant('anime'),
+            staleNoticeDismissed: undefined,
+          }, results)
+          outputMedia = completed.media
+          return { ...node, data: completed }
+        })
         return {
           ...canvas,
           nodes: syncTargetReferences(markDirectDependentsStale(completedNodes, canvas.edges, [nodeId]), canvas.edges),
           tasks: canvas.tasks.map((item) => item.id === taskId
-            ? { ...item, status: 'success', progress: 100, outputMedia: imageMediaForVariant('anime') }
+            ? { ...item, status: 'success', progress: 100, outputMedia }
             : item),
         }
       })
@@ -3383,6 +3407,8 @@ function CanvasPrototype() {
           content: file.name,
           mediaVariant: node.data.nodeType === 'audio' ? 'audio' : undefined,
           media,
+          generationResults: undefined,
+          primaryGenerationResultId: undefined,
           favorite: undefined,
           error: undefined,
           staleNoticeDismissed: undefined,
@@ -4364,8 +4390,27 @@ function CanvasPrototype() {
     })), [nodes])
   const seedanceComplianceAssets = useMemo(() => nodes.filter((node) => node.data.seedanceCompliance === 'approved'), [nodes])
 
+  const handleCanvasPaneClick = useCallback(() => {
+    setCanvasPaneClickVersion((version) => version + 1)
+    if (interactionMode?.kind === 'playlist-clips') setInteractionMode(null)
+    setPlaylistSelection(null)
+    setDrawer(null)
+    setCanvasToolOpen(false)
+    setShareMenuOpen(false)
+    setQuickAdd(null)
+    setCanvasContextMenu(null)
+    setContinuation(null)
+    setContextAdd(null)
+    setAlignmentGuides([])
+    setNodes((current) => current.map((node) => ({ ...node, selected: false })))
+    setEdges((current) => current.map((edge) => ({ ...edge, selected: false })))
+  }, [interactionMode, setEdges, setNodes])
+
   const actions = useMemo(() => ({
     updateNode,
+    setPrimaryGenerationResult,
+    setGenerationResultFavorite,
+    canvasPaneClickVersion,
     changeTextModel,
     renameNode,
     runGeneration: (nodeId: string) => startTask(nodeId),
@@ -4406,7 +4451,7 @@ function CanvasPrototype() {
     videoEditAssets,
     seedanceComplianceAssets,
     notify,
-  }), [addPromptMarker, beginMarkerSelection, beginReferenceSelection, cancelPendingImageEditor, cancelPendingVideoOperation, changeTextModel, changeVideoGenerationMode, completeImageEditor, completeImageUpscale, completeVideoEdit, completeVideoOperation, createAudioTrimDerivative, createImageDerivative, createLipSyncDerivative, deleteEdge, exitInteractionMode, hoveredPromptMarkerId, interactionMode, isConnectionTargetCandidate, isInteractionCandidate, markersForSource, notify, openContextAdd, openContinuation, openImageEditor, prepareImageEditor, prepareImageUpscale, prepareVideoOperation, regenerateImage, removeReference, renameNode, retryGeneration, seedanceComplianceAssets, selectedItemCount, startTask, updateNode, updatePromptMarker, uploadNodeMedia, videoEditAssets])
+  }), [addPromptMarker, beginMarkerSelection, beginReferenceSelection, cancelPendingImageEditor, cancelPendingVideoOperation, canvasPaneClickVersion, changeTextModel, changeVideoGenerationMode, completeImageEditor, completeImageUpscale, completeVideoEdit, completeVideoOperation, createAudioTrimDerivative, createImageDerivative, createLipSyncDerivative, deleteEdge, exitInteractionMode, hoveredPromptMarkerId, interactionMode, isConnectionTargetCandidate, isInteractionCandidate, markersForSource, notify, openContextAdd, openContinuation, openImageEditor, prepareImageEditor, prepareImageUpscale, prepareVideoOperation, regenerateImage, removeReference, renameNode, retryGeneration, seedanceComplianceAssets, selectedItemCount, setGenerationResultFavorite, setPrimaryGenerationResult, startTask, updateNode, updatePromptMarker, uploadNodeMedia, videoEditAssets])
 
   const activeTasks = tasks.filter((task) => task.status === 'queued' || task.status === 'running').length
   const pinCounts = nodes.reduce<Record<PinColor, number>>((counts, node) => {
@@ -4455,10 +4500,28 @@ function CanvasPrototype() {
     setProjects((current) => current.map((project) => project.id === projectId ? { ...project, name, updatedAt: Date.now() } : project))
     notify('画布名称已更新')
   }, [notify])
+  const changeProjectCoverFromHome = useCallback(async (projectId: string, file: File) => {
+    if (!file.type.startsWith('image/')) {
+      notify('请选择图片文件')
+      return
+    }
+    try {
+      const imageUrl = await readImageFileAsDataUrl(file)
+      const updatedAt = Date.now()
+      setProjects((current) => current.map((project) => project.id === projectId ? {
+        ...project,
+        updatedAt,
+        cover: { mode: 'manual', imageUrl, source: 'upload', updatedAt },
+      } : project))
+      notify('画布封面已更新')
+    } catch {
+      notify('封面读取失败，请重新选择图片')
+    }
+  }, [notify])
 
   if (screen === 'home' || !activeProject) {
     return <CanvasActionContext.Provider value={actions}>
-      <CanvasHome projects={projects} onCreate={createProjectFromHome} onOpen={openProjectFromHome} onRename={renameProjectFromHome} onDelete={deleteProjects} />
+      <CanvasHome projects={projects} onCreate={createProjectFromHome} onOpen={openProjectFromHome} onRename={renameProjectFromHome} onChangeCover={changeProjectCoverFromHome} onDelete={deleteProjects} />
       {toast && <div className="toast canvas-home-toast" role="status" aria-live="polite">{toast}</div>}
     </CanvasActionContext.Provider>
   }
@@ -4542,7 +4605,9 @@ function CanvasPrototype() {
           onRenamePlaylist={renamePlaylist}
           onDuplicatePlaylist={duplicatePlaylist}
           onDeletePlaylist={deletePlaylist}
-          onToggleNodeFavorite={(nodeId, favorite) => updateNode(nodeId, { favorite })}
+          onToggleNodeFavorite={(nodeId, favorite, resultId) => resultId
+            ? setGenerationResultFavorite(nodeId, resultId, favorite)
+            : updateNode(nodeId, { favorite })}
           sessionAssets={sessionAssets}
           assetFolders={assetFolders}
         />
@@ -4654,8 +4719,9 @@ function CanvasPrototype() {
           if (!currentMarquee || event.pointerId !== currentMarquee.pointerId) return
           event.preventDefault()
           event.stopPropagation()
+          const pointerDistance = Math.hypot(event.clientX - currentMarquee.startX, event.clientY - currentMarquee.startY)
           const isBlankRightClick = event.button === 2
-            && Math.hypot(event.clientX - currentMarquee.startX, event.clientY - currentMarquee.startY) <= 12
+            && pointerDistance <= 12
           if (isBlankRightClick) {
             marqueeRef.current = null
             setMarquee(null)
@@ -4669,6 +4735,7 @@ function CanvasPrototype() {
           setMarquee(null)
           if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId)
           window.setTimeout(() => { suppressPaneClickRef.current = false }, 0)
+          if (event.button === 0 && pointerDistance <= 6) handleCanvasPaneClick()
         }} onPointerCancelCapture={(event) => {
           if (pendingQuickAddRef.current?.pointerId === event.pointerId) {
             pendingQuickAddRef.current = null
@@ -4713,18 +4780,7 @@ function CanvasPrototype() {
             onMoveEnd={(_event, viewport) => updateCanvas(activeCanvasId, (canvas) => ({ ...canvas, viewport }))}
             onPaneClick={() => {
               if (suppressPaneClickRef.current) return
-              if (interactionMode?.kind === 'playlist-clips') setInteractionMode(null)
-              setPlaylistSelection(null)
-              setDrawer(null)
-              setCanvasToolOpen(false)
-              setShareMenuOpen(false)
-              setQuickAdd(null)
-              setCanvasContextMenu(null)
-              setContinuation(null)
-              setContextAdd(null)
-              setAlignmentGuides([])
-              setNodes((current) => current.map((node) => ({ ...node, selected: false })))
-              setEdges((current) => current.map((edge) => ({ ...edge, selected: false })))
+              handleCanvasPaneClick()
             }}
             fitView
             fitViewOptions={{ padding: 0.16, minZoom: 0.62, maxZoom: 0.94 }}
@@ -4900,7 +4956,7 @@ function CanvasPrototype() {
           <button type="button" className="ui-tooltip-control" data-tooltip="放大" onClick={() => zoomIn({ duration: 140 })} aria-label="放大"><Plus size={15} /></button>
         </div>
 
-        <div className="prototype-note"><Sparkles size={14} /><span>V2.0.1 交互原型 · Mock 数据</span></div>
+        <div className="prototype-note"><Sparkles size={14} /><span>V2.1 交互原型 · Mock 数据</span></div>
         {toast && <div className={`toast ${toast.includes('\n') ? 'has-detail' : ''}`} role="status" aria-live="polite">{toast.includes('\n') ? <><Check size={18} /><span><strong>{toast.split('\n')[0]}</strong><small>{toast.split('\n')[1]}</small></span></> : /任务已进入队列|生成中|处理中|等待执行|^正在/.test(toast) ? <ShinyText text={toast} speed={1.8} color="#393939" shineColor="#ffffff" spread={92} /> : toast}</div>}
       </main>
     </CanvasActionContext.Provider>

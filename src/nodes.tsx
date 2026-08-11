@@ -35,6 +35,7 @@ import {
   List,
   LoaderCircle,
   Maximize2,
+  Minimize2,
   Mic2,
   MonitorUp,
   MoreHorizontal,
@@ -87,6 +88,7 @@ import {
 } from './imageOperations'
 import { generationDefinitions, videoModeOptions, videoModelCapabilities } from './mockData'
 import { fitMediaAspect, formatMediaResolution } from './mediaGeometry'
+import { generationResultsFor, primaryGenerationResult } from './multiResult'
 import { parseTextContent } from './textContent'
 import {
   DEFAULT_TEXT_MODEL_ID,
@@ -112,6 +114,7 @@ import type {
   ImageGenerationParams,
   GenerationReferenceRole,
   MediaMetadata,
+  MediaGenerationResult,
   ModelParameter,
   NodeReference,
   PinColor,
@@ -1848,6 +1851,74 @@ function ImageVisual({ data }: { data: CanvasNodeData }) {
   </>
 }
 
+export function MultiResultMedia({
+  data,
+  mediaType,
+  expanded,
+  onExpand,
+  onCollapse,
+  onSetPrimary,
+  onSetFavorite,
+}: {
+  data: CanvasNodeData
+  mediaType: 'image' | 'video'
+  expanded: boolean
+  onExpand: () => void
+  onCollapse: () => void
+  onSetPrimary: (resultId: string) => void
+  onSetFavorite: (resultId: string, favorite: boolean) => void
+}) {
+  const results = generationResultsFor(data)
+  const primary = primaryGenerationResult(data)
+  if (results.length < 2 || !primary) return null
+  const unit = mediaType === 'image' ? '张' : '个'
+  const primaryAction = mediaType === 'image' ? '主图' : '主视频'
+  const downloadLabel = '下载'
+  const renderMedia = (result: MediaGenerationResult, index: number) => {
+    const candidateData: CanvasNodeData = {
+      ...data,
+      content: result.content,
+      media: result.media,
+      mediaVariant: result.mediaVariant,
+      generationResults: undefined,
+      primaryGenerationResultId: undefined,
+    }
+    return mediaType === 'image'
+      ? <ImageVisual data={candidateData} />
+      : <VideoPlayer label={`${data.title}候选视频 ${index + 1}`} media={result.media} compact />
+  }
+  const resultDownload = (result: MediaGenerationResult, index: number) => ({
+    filename: `${data.title}-方案${index + 1}.${mediaFileExtension(result.media, mediaType)}`,
+    href: result.media.url,
+  })
+
+  if (!expanded) {
+    return <div className={`multi-result-collapsed multi-result-${mediaType}`}>
+      <div className="multi-result-primary-media">{renderMedia(primary, results.findIndex((result) => result.id === primary.id))}</div>
+      <button type="button" className="multi-result-expand nodrag" aria-label={`展开${results.length}${unit}结果`} onClick={(event) => { event.stopPropagation(); onExpand() }}><Maximize2 size={14} />{results.length}{unit}</button>
+    </div>
+  }
+
+  return <div className={`multi-result-grid count-${results.length}`} role="list" aria-label={`${data.title}${results.length}${unit}生成结果`}>
+    {results.map((result, index) => {
+      const isPrimary = result.id === primary.id
+      const download = resultDownload(result, index)
+      return <article key={result.id} role="listitem" className={`multi-result-item ${isPrimary ? 'is-primary' : ''}`} aria-label={`${isPrimary ? `当前${primaryAction}` : '候选结果'} ${index + 1}`}>
+        <div className="multi-result-item-media">{renderMedia(result, index)}</div>
+        <div className="multi-result-utility-actions nodrag" role="group" aria-label={`方案 ${index + 1} 常用操作`}>
+          <button type="button" className={result.favorite ? 'active' : ''} aria-label={result.favorite ? `取消收藏方案 ${index + 1}` : `收藏方案 ${index + 1}`} title={result.favorite ? '取消收藏' : '收藏'} onClick={(event) => { event.stopPropagation(); onSetFavorite(result.id, !result.favorite) }}><Star size={14} fill={result.favorite ? 'currentColor' : 'none'} /></button>
+          <a href={download.href} download={download.filename} aria-label={`${downloadLabel}方案 ${index + 1}`} title={downloadLabel} onClick={(event) => event.stopPropagation()}><Download size={14} /></a>
+        </div>
+        <div className="multi-result-primary-action nodrag">
+          {isPrimary
+            ? <button type="button" aria-label={`收起${results.length}${unit}结果`} onClick={(event) => { event.stopPropagation(); onCollapse() }}><Minimize2 size={13} />收起</button>
+            : <button type="button" aria-label={`将方案 ${index + 1} 设为${primaryAction}`} onClick={(event) => { event.stopPropagation(); onSetPrimary(result.id) }}>设为{primaryAction}</button>}
+        </div>
+      </article>
+    })}
+  </div>
+}
+
 function UpscaleNodeConfig({ id, data }: { id: string; data: CanvasNodeData }) {
   const { updateNode, completeImageUpscale } = useCanvasActions()
   const [resolution, setResolution] = useState<'2K' | '4K' | '6K'>(data.imageOperation?.resolution ?? '4K')
@@ -1879,8 +1950,9 @@ function MediaGenerationProgress({ progress }: { progress?: number }) {
 }
 
 export const ImageNode = memo(function ImageNode({ id, data, selected }: NodeProps<CanvasFlowNode>) {
-  const { updateNode, notify, retryGeneration, interactionMode, isInteractionCandidate, addPromptMarker, markersForSource, hoveredPromptMarkerId, hoverPromptMarker, selectedItemCount, isConnectionTargetCandidate, uploadNodeMedia, openImageEditor } = useCanvasActions()
+  const { updateNode, setPrimaryGenerationResult, setGenerationResultFavorite, canvasPaneClickVersion, notify, retryGeneration, interactionMode, isInteractionCandidate, addPromptMarker, markersForSource, hoveredPromptMarkerId, hoverPromptMarker, selectedItemCount, isConnectionTargetCandidate, uploadNodeMedia, openImageEditor } = useCanvasActions()
   const [previewOpen, setPreviewOpen] = useState(false)
+  const [multiResultExpanded, setMultiResultExpanded] = useState(false)
   const [activeTool, setActiveTool] = useState<Exclude<ImageOperation, 'prompt-regenerate'> | null>(null)
   const replaceInputRef = useRef<HTMLInputElement>(null)
   const uploadInputRef = useRef<HTMLInputElement>(null)
@@ -1889,6 +1961,10 @@ export const ImageNode = memo(function ImageNode({ id, data, selected }: NodePro
   const pendingUpscale = data.status === 'ready' && data.imageOperation?.operation === 'upscale'
   const isGenerating = data.status === 'queued' || data.status === 'running'
   const hasContent = !pendingUpscale && Boolean((data.content ?? '').trim() || data.media?.url || data.imageOperation?.editorComposition?.renderedDataUrl)
+  const hasMultipleResults = hasContent
+    && !isGenerating
+    && (!data.imageOperation || data.imageOperation.operation === 'prompt-regenerate')
+    && (data.generationResults?.length ?? 0) > 1
   const isInitialImageEditor = data.imageOperation?.operation === 'image-editor' && !hasContent
   const canContinueEditing = (data.imageOperation?.operation === 'image-editor' || data.imageOperation?.operation === 'image-compose')
     && Boolean(data.imageOperation.editorComposition)
@@ -1897,10 +1973,10 @@ export const ImageNode = memo(function ImageNode({ id, data, selected }: NodePro
   const interactionClass = interactionNodeClass(id, interactionMode, isInteractionCandidate(id))
   const pendingImageEditor = data.status === 'ready' && (data.imageOperation?.operation === 'rotate' || data.imageOperation?.operation === 'edit-text')
   const quarterTurn = data.imageOperation?.operation === 'rotate' && isQuarterTurn(data.imageOperation.angle)
-  const showPrompt = focused && !isInitialImageEditor && shouldShowImageGenerationPrompt(data) && !activeTool
+  const showPrompt = focused && !multiResultExpanded && !isInitialImageEditor && shouldShowImageGenerationPrompt(data) && !activeTool
   const sourceMarkers = markersForSource(id)
   const visualRatio = imageSurfaceRatio(data)
-  const overlaySelector = !focused
+  const overlaySelector = !focused || multiResultExpanded
     ? null
     : pendingUpscale
       ? '.upscale-node-config'
@@ -1922,6 +1998,8 @@ export const ImageNode = memo(function ImageNode({ id, data, selected }: NodePro
       sourceKind: 'upload',
       mediaVariant: undefined,
       media: { url, mimeType: file.type || undefined },
+      generationResults: undefined,
+      primaryGenerationResultId: undefined,
       favorite: undefined,
     })
     const probe = new Image()
@@ -1930,6 +2008,8 @@ export const ImageNode = memo(function ImageNode({ id, data, selected }: NodePro
   }
 
   useEffect(() => { if (!focused) setActiveTool(null) }, [focused])
+  useEffect(() => { if (!hasMultipleResults) setMultiResultExpanded(false) }, [hasMultipleResults])
+  useEffect(() => { setMultiResultExpanded(false) }, [canvasPaneClickVersion])
   useKeepNodeOverlayInViewport(nodeRef, overlaySelector)
 
   if (isInitialImageEditor) {
@@ -1948,12 +2028,12 @@ export const ImageNode = memo(function ImageNode({ id, data, selected }: NodePro
   }
 
   return (
-    <article ref={nodeRef} className={`canvas-node image-node ${selected ? 'is-selected' : ''} ${candidate ? 'is-connection-candidate' : ''} ${hasContent || isGenerating || data.status === 'failed' ? '' : 'is-empty'} ${data.status === 'failed' ? 'has-error' : ''} ${quarterTurn ? 'is-quarter-turn' : ''} ${data.imageGeneration?.stylePreset ? `mock-style-${data.imageGeneration.stylePreset}` : ''} ${interactionClass}`} style={overlayVariables}>
+    <article ref={nodeRef} className={`canvas-node image-node ${selected ? 'is-selected' : ''} ${candidate ? 'is-connection-candidate' : ''} ${hasContent || isGenerating || data.status === 'failed' ? '' : 'is-empty'} ${data.status === 'failed' ? 'has-error' : ''} ${quarterTurn ? 'is-quarter-turn' : ''} ${hasMultipleResults ? 'has-multi-results' : ''} ${multiResultExpanded ? 'is-multi-result-expanded' : ''} ${data.imageGeneration?.stylePreset ? `mock-style-${data.imageGeneration.stylePreset}` : ''} ${interactionClass}`} style={overlayVariables}>
       <ConnectionHandles nodeId={id} />
-      {focused && hasContent && !isGenerating && !pendingImageEditor && <ImageToolbar id={id} data={data} activeTool={activeTool} onTool={(tool) => setActiveTool((current) => current === tool ? null : tool)} onExpand={() => setPreviewOpen(true)} />}
+      {focused && !multiResultExpanded && hasContent && !isGenerating && !pendingImageEditor && <ImageToolbar id={id} data={data} activeTool={activeTool} onTool={(tool) => setActiveTool((current) => current === tool ? null : tool)} onExpand={() => setPreviewOpen(true)} />}
       <NodeHeader id={id} data={data} icon={<ImageIcon size={13} />} />
       {focused && !hasContent && !isGenerating && data.status !== 'failed' && !pendingUpscale && canUploadToEmptyMediaNode(data) && <><button type="button" className="empty-node-upload nodrag" onClick={() => uploadInputRef.current?.click()}><Upload size={14} />上传</button><input ref={uploadInputRef} className="sr-only" type="file" accept="image/*" aria-label="上传图片到当前节点" onChange={(event) => { const file = event.target.files?.[0]; if (file) uploadNodeMedia(id, file); event.currentTarget.value = '' }} /></>}
-      <div className="node-surface image-surface" style={{ aspectRatio: visualRatio }} onClick={(event) => {
+      <div className="node-surface image-surface" style={{ aspectRatio: multiResultExpanded ? 'auto' : visualRatio }} onClick={(event) => {
         if (interactionMode?.kind === 'marker' && isInteractionCandidate(id)) {
           event.stopPropagation()
           const rect = event.currentTarget.getBoundingClientRect()
@@ -1968,12 +2048,20 @@ export const ImageNode = memo(function ImageNode({ id, data, selected }: NodePro
           ? <MediaErrorState error={data.error} onRetry={() => retryGeneration(id)} />
             : isGenerating
               ? <MediaGenerationProgress progress={data.progress} />
+              : hasMultipleResults
+                ? <MultiResultMedia data={data} mediaType="image" expanded={multiResultExpanded} onExpand={() => { setActiveTool(null); setMultiResultExpanded(true) }} onCollapse={() => setMultiResultExpanded(false)} onSetPrimary={(resultId) => setPrimaryGenerationResult(id, resultId)} onSetFavorite={(resultId, favorite) => setGenerationResultFavorite(id, resultId, favorite)} />
               : hasContent
             ? <div className="image-preview" role="img" aria-label={data.content ?? data.title}><ImageVisual data={data} />{data.imageOperation?.operation === 'repaint' && <span className="repaint-result-mark" aria-label="重绘区域" />}</div>
             : <div className="empty-media-node"><ImageIcon size={25} />{pendingUpscale ? <strong>图片高清</strong> : <strong className="sr-only">图片</strong>}</div>}
-        {hasContent && !isGenerating && canFavoriteMediaNode(data) && <button type="button" className={`image-favorite ${data.favorite ? 'active' : ''} nodrag`} onClick={() => { updateNode(id, { favorite: !data.favorite }); notify(data.favorite ? '已取消收藏' : '已收藏到资产') }} aria-label={data.favorite ? '取消收藏图片' : '收藏图片'} title={data.favorite ? '取消收藏' : '收藏'}><Star size={16} fill={data.favorite ? 'currentColor' : 'none'} /></button>}
+        {hasContent && !multiResultExpanded && !isGenerating && canFavoriteMediaNode(data) && <button type="button" className={`image-favorite ${data.favorite ? 'active' : ''} nodrag`} onClick={() => {
+          if (data.primaryGenerationResultId) setGenerationResultFavorite(id, data.primaryGenerationResultId, !data.favorite)
+          else {
+            updateNode(id, { favorite: !data.favorite })
+            notify(data.favorite ? '已取消收藏' : '已收藏到资产')
+          }
+        }} aria-label={data.favorite ? '取消收藏图片' : '收藏图片'} title={data.favorite ? '取消收藏' : '收藏'}><Star size={16} fill={data.favorite ? 'currentColor' : 'none'} /></button>}
         {hasContent && !isGenerating && data.starterReplaceable && <><button type="button" className="image-replace-action nodrag" onClick={(event) => { event.stopPropagation(); replaceInputRef.current?.click() }} aria-label={`替换${data.title}`}><Upload size={13} />替换</button><input ref={replaceInputRef} className="sr-only nodrag" type="file" accept="image/*" aria-label={`选择替换${data.title}`} onChange={(event) => { const file = event.target.files?.[0]; if (file) replaceStarterImage(file); event.currentTarget.value = '' }} /></>}
-        {sourceMarkers.map((marker) => <button type="button" key={marker.id} className={`image-focus-hotspot ${hoveredPromptMarkerId === marker.id ? 'active' : ''}`} style={{ left: `${marker.x * 100}%`, top: `${marker.y * 100}%` }} onMouseEnter={() => hoverPromptMarker(marker.id)} onMouseLeave={() => hoverPromptMarker(null)} aria-label={marker.label} title={marker.label}>{marker.label}</button>)}
+        {!multiResultExpanded && sourceMarkers.map((marker) => <button type="button" key={marker.id} className={`image-focus-hotspot ${hoveredPromptMarkerId === marker.id ? 'active' : ''}`} style={{ left: `${marker.x * 100}%`, top: `${marker.y * 100}%` }} onMouseEnter={() => hoverPromptMarker(marker.id)} onMouseLeave={() => hoverPromptMarker(null)} aria-label={marker.label} title={marker.label}>{marker.label}</button>)}
       </div>
       {focused && (activeTool === 'crop' || activeTool === 'repaint' || activeTool === 'expand') && <ImageFocusEditor id={id} data={data} tool={activeTool} onClose={() => setActiveTool(null)} />}
       {focused && activeTool === 'annotate' && <ImageAnnotationEditor id={id} data={data} onClose={() => setActiveTool(null)} />}
@@ -2468,9 +2556,10 @@ function VideoToolbar({ id, data, onExpand, onLipSync }: { id: string; data: Can
 }
 
 export const VideoNode = memo(function VideoNode({ id, data, selected }: NodeProps<CanvasFlowNode>) {
-  const { retryGeneration, updateNode, notify, selectedItemCount, isConnectionTargetCandidate, interactionMode, isInteractionCandidate, uploadNodeMedia } = useCanvasActions()
+  const { retryGeneration, updateNode, setPrimaryGenerationResult, setGenerationResultFavorite, canvasPaneClickVersion, notify, selectedItemCount, isConnectionTargetCandidate, interactionMode, isInteractionCandidate, uploadNodeMedia } = useCanvasActions()
   const [previewOpen, setPreviewOpen] = useState(false)
   const [lipSyncOpen, setLipSyncOpen] = useState(false)
+  const [multiResultExpanded, setMultiResultExpanded] = useState(false)
   const uploadInputRef = useRef<HTMLInputElement>(null)
   const nodeRef = useRef<HTMLElement>(null)
   const overlayVariables = useStableOverlayVariables()
@@ -2478,20 +2567,23 @@ export const VideoNode = memo(function VideoNode({ id, data, selected }: NodePro
   const isGenerating = data.status === 'queued' || data.status === 'running'
   const hasContent = Boolean((data.content ?? '').trim()) || data.status === 'success'
   const hasResult = hasContent || isGenerating
+  const hasMultipleResults = hasContent && !isGenerating && !data.videoOperation && (data.generationResults?.length ?? 0) > 1
   const focused = selected && selectedItemCount === 1
   const candidate = isConnectionTargetCandidate(id)
   const interactionClass = interactionNodeClass(id, interactionMode, isInteractionCandidate(id))
   useEffect(() => {
     if ((!focused || pendingOperation) && lipSyncOpen) setLipSyncOpen(false)
   }, [focused, lipSyncOpen, pendingOperation])
-  const showGenerationConfig = focused && !lipSyncOpen && shouldShowVideoGenerationPanel(data)
+  useEffect(() => { if (!hasMultipleResults) setMultiResultExpanded(false) }, [hasMultipleResults])
+  useEffect(() => { setMultiResultExpanded(false) }, [canvasPaneClickVersion])
+  const showGenerationConfig = focused && !multiResultExpanded && !lipSyncOpen && shouldShowVideoGenerationPanel(data)
   const mediaGeometry = fitMediaAspect(data.media?.width, data.media?.height)
   const nodeStyle = {
     ...overlayVariables,
     '--video-node-width': `${mediaGeometry.width}px`,
     '--video-preview-ratio': String(mediaGeometry.ratio),
   } as CSSProperties
-  const overlaySelector = !focused
+  const overlaySelector = !focused || multiResultExpanded
     ? null
     : lipSyncOpen
       ? '.lip-sync-panel'
@@ -2505,18 +2597,26 @@ export const VideoNode = memo(function VideoNode({ id, data, selected }: NodePro
               ? '.video-toolbar'
               : null
   useKeepNodeOverlayInViewport(nodeRef, overlaySelector)
-  return <article ref={nodeRef} className={`canvas-node video-node ${selected ? 'is-selected' : ''} ${candidate ? 'is-connection-candidate' : ''} ${hasResult || data.status === 'failed' || pendingOperation ? '' : 'is-empty'} ${data.status === 'failed' ? 'has-error' : ''} ${pendingOperation ? 'is-video-operation' : ''} ${interactionClass}`} style={nodeStyle}>
+  return <article ref={nodeRef} className={`canvas-node video-node ${selected ? 'is-selected' : ''} ${candidate ? 'is-connection-candidate' : ''} ${hasResult || data.status === 'failed' || pendingOperation ? '' : 'is-empty'} ${data.status === 'failed' ? 'has-error' : ''} ${pendingOperation ? 'is-video-operation' : ''} ${hasMultipleResults ? 'has-multi-results' : ''} ${multiResultExpanded ? 'is-multi-result-expanded' : ''} ${interactionClass}`} style={nodeStyle}>
     <ConnectionHandles nodeId={id} />
     <VideoOperationOutputHandle />
-    {focused && hasContent && !pendingOperation && <VideoToolbar id={id} data={data} onExpand={() => setPreviewOpen(true)} onLipSync={() => setLipSyncOpen((open) => !open)} />}
+    {focused && !multiResultExpanded && hasContent && !pendingOperation && <VideoToolbar id={id} data={data} onExpand={() => setPreviewOpen(true)} onLipSync={() => setLipSyncOpen((open) => !open)} />}
     <NodeHeader id={id} data={data} icon={<Video size={13} />} />
     {focused && !hasResult && data.status !== 'failed' && !pendingOperation && canUploadToEmptyMediaNode(data) && <><button type="button" className="empty-node-upload nodrag" onClick={() => uploadInputRef.current?.click()}><Upload size={14} />上传</button><input ref={uploadInputRef} className="sr-only" type="file" accept="video/*" aria-label="上传视频到当前节点" onChange={(event) => { const file = event.target.files?.[0]; if (file) uploadNodeMedia(id, file); event.currentTarget.value = '' }} /></>}
     <div className="node-surface video-preview">
         {!hasResult && data.status !== 'failed' && <div className="video-empty"><span>{pendingOperation ? <WandSparkles size={21} /> : <Play size={21} />}</span>{pendingOperation ? <strong>{videoOperationLabels[pendingOperation.operation].title}</strong> : <strong className="sr-only">视频</strong>}</div>}
-        {hasContent && !isGenerating && <VideoPlayer label={`${data.title}视频播放器`} media={data.media} compact />}
+        {hasMultipleResults
+          ? <MultiResultMedia data={data} mediaType="video" expanded={multiResultExpanded} onExpand={() => { setLipSyncOpen(false); setMultiResultExpanded(true) }} onCollapse={() => setMultiResultExpanded(false)} onSetPrimary={(resultId) => setPrimaryGenerationResult(id, resultId)} onSetFavorite={(resultId, favorite) => setGenerationResultFavorite(id, resultId, favorite)} />
+          : hasContent && !isGenerating && <VideoPlayer label={`${data.title}视频播放器`} media={data.media} compact />}
         {data.status === 'failed' && <MediaErrorState error={data.error} onRetry={() => retryGeneration(id)} />}
         {isGenerating && <>{hasContent && <VideoPlayer label={`${data.title}生成预览`} media={data.media} compact />}<MediaGenerationProgress progress={data.progress} /></>}
-        {hasContent && !isGenerating && canFavoriteMediaNode(data) && <button type="button" className={`video-favorite ${data.favorite ? 'active' : ''} nodrag`} onClick={() => { updateNode(id, { favorite: !data.favorite }); notify(data.favorite ? '已取消收藏' : '已收藏到资产') }} aria-label={data.favorite ? '取消收藏视频' : '收藏视频'} title={data.favorite ? '取消收藏' : '收藏'}><Star size={16} fill={data.favorite ? 'currentColor' : 'none'} /></button>}
+        {hasContent && !multiResultExpanded && !isGenerating && canFavoriteMediaNode(data) && <button type="button" className={`video-favorite ${data.favorite ? 'active' : ''} nodrag`} onClick={() => {
+          if (data.primaryGenerationResultId) setGenerationResultFavorite(id, data.primaryGenerationResultId, !data.favorite)
+          else {
+            updateNode(id, { favorite: !data.favorite })
+            notify(data.favorite ? '已取消收藏' : '已收藏到资产')
+          }
+        }} aria-label={data.favorite ? '取消收藏视频' : '收藏视频'} title={data.favorite ? '取消收藏' : '收藏'}><Star size={16} fill={data.favorite ? 'currentColor' : 'none'} /></button>}
       </div>
     {focused && pendingOperation && pendingOperation.operation !== 'edit' && <VideoOperationConfig id={id} data={data} />}
     {focused && pendingOperation?.operation === 'edit' && <VideoEditPanel id={id} data={data} />}

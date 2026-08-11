@@ -7,6 +7,16 @@ export interface CanvasProject {
   updatedAt: number
   canvases: CanvasDocument[]
   activeCanvasId: string
+  cover?: CanvasProjectCover
+}
+
+export interface CanvasProjectCover {
+  mode: 'auto' | 'manual'
+  imageUrl?: string
+  source: 'default' | 'snapshot' | 'upload'
+  canvasId?: string
+  sourceNodeId?: string
+  updatedAt?: number
 }
 
 export function canvasProjectActiveCanvas(project: CanvasProject) {
@@ -21,6 +31,7 @@ export function createCanvasProject(id: string, name: string, canvas: CanvasDocu
     updatedAt: createdAt,
     canvases: [canvas],
     activeCanvasId: canvas.id,
+    cover: { mode: 'auto', source: 'default' },
   }
 }
 

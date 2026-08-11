@@ -59,7 +59,7 @@ interface DrawerProps {
   onRenamePlaylist: (playlistId: string, title: string) => void
   onDuplicatePlaylist: (playlistId: string) => void
   onDeletePlaylist: (playlistId: string) => void
-  onToggleNodeFavorite: (nodeId: string, favorite: boolean) => void
+  onToggleNodeFavorite: (nodeId: string, favorite: boolean, resultId?: string) => void
   sessionAssets: SessionAsset[]
   assetFolders: AssetFolder[]
 }
@@ -347,7 +347,7 @@ function SearchBox({ value, onChange, placeholder }: { value: string; onChange: 
   return <label className="drawer-search"><Search size={16} /><span className="sr-only">{placeholder}</span><input value={value} onChange={(event) => onChange(event.target.value)} placeholder={placeholder} /></label>
 }
 
-type AssetEntry = { id: string; title: string; type: '文本' | '图片' | '视频' | '音频'; nodeType: MediaNodeType; className: string; category: string; scope: 'personal' | 'project'; posterUrl?: string; nodeId?: string; canvasFavorite?: boolean; savedAsset?: boolean; sessionAsset?: SessionAsset }
+type AssetEntry = { id: string; title: string; type: '文本' | '图片' | '视频' | '音频'; nodeType: MediaNodeType; className: string; category: string; scope: 'personal' | 'project'; posterUrl?: string; nodeId?: string; resultId?: string; canvasFavorite?: boolean; savedAsset?: boolean; sessionAsset?: SessionAsset }
 
 const assetEntries: AssetEntry[] = [
   { id: 'dog', title: '柴犬棚拍首帧', type: '图片', nodeType: 'image', className: 'asset-poster dog-poster', category: 'uncategorized', scope: 'personal' },
@@ -366,23 +366,42 @@ function AssetsDrawer({ onAddNode, onAddSessionAsset, nodes, onToggleNodeFavorit
   const [newFolder, setNewFolder] = useState('')
   const [creatingFolder, setCreatingFolder] = useState(false)
 
-  const canvasFavorites = nodes
-    .filter((node) => canFavoriteMediaNode(node.data) && node.data.favorite)
-    .map((node): AssetEntry => {
+  const canvasFavorites = nodes.flatMap((node): AssetEntry[] => {
+    if (!canFavoriteMediaNode(node.data)) return []
+    const favoriteResults = node.data.generationResults
+      ?.map((result, index) => ({ result, index }))
+      .filter(({ result }) => result.favorite) ?? []
+    if (favoriteResults.length) {
       const isVideo = node.data.nodeType === 'video'
-      return {
-        id: `canvas-${node.id}`,
+      return favoriteResults.map(({ result, index }) => ({
+        id: `canvas-${node.id}-${result.id}`,
         nodeId: node.id,
-        title: node.data.title,
+        resultId: result.id,
+        title: `${node.data.title} · 方案 ${index + 1}`,
         type: isVideo ? '视频' : '图片',
         nodeType: isVideo ? 'video' : 'image',
-        className: isVideo ? 'asset-poster saved-video' : `asset-poster ${node.data.mediaVariant === 'anime' ? 'anime-poster' : node.data.mediaVariant === 'ip' ? 'ip-one' : node.data.mediaVariant === 'poster' ? 'text-poster' : 'dog-poster'}`,
+        className: isVideo ? 'asset-poster saved-video' : 'asset-poster saved-image',
         category: 'uncategorized',
         scope: 'personal',
-        posterUrl: isVideo ? node.data.media?.posterUrl : undefined,
+        posterUrl: result.media.posterUrl ?? result.media.url,
         canvasFavorite: true,
-      }
-    })
+      }))
+    }
+    if (!node.data.favorite) return []
+    const isVideo = node.data.nodeType === 'video'
+    return [{
+      id: `canvas-${node.id}`,
+      nodeId: node.id,
+      title: node.data.title,
+      type: isVideo ? '视频' : '图片',
+      nodeType: isVideo ? 'video' : 'image',
+      className: isVideo ? 'asset-poster saved-video' : `asset-poster ${node.data.mediaVariant === 'anime' ? 'anime-poster' : node.data.mediaVariant === 'ip' ? 'ip-one' : node.data.mediaVariant === 'poster' ? 'text-poster' : 'dog-poster'}`,
+      category: 'uncategorized',
+      scope: 'personal',
+      posterUrl: isVideo ? node.data.media?.posterUrl : undefined,
+      canvasFavorite: true,
+    }]
+  })
   const savedEntries: AssetEntry[] = sessionAssets.map((asset) => ({
     id: asset.id,
     title: asset.title,
@@ -406,9 +425,9 @@ function AssetsDrawer({ onAddNode, onAddSessionAsset, nodes, onToggleNodeFavorit
     return true
   })
 
-  const toggleFavorite = (id: string, nodeId?: string) => {
+  const toggleFavorite = (id: string, nodeId?: string, resultId?: string) => {
     if (nodeId) {
-      onToggleNodeFavorite(nodeId, false)
+      onToggleNodeFavorite(nodeId, false, resultId)
       return
     }
     setFavorites((current) => {
@@ -442,7 +461,7 @@ function AssetsDrawer({ onAddNode, onAddSessionAsset, nodes, onToggleNodeFavorit
       {creatingFolder && <div className="new-folder-row"><input aria-label="新文件夹名称" autoFocus value={newFolder} placeholder="文件夹名称" onChange={(event) => setNewFolder(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter') saveFolder(); if (event.key === 'Escape') setCreatingFolder(false) }} /><button type="button" onClick={saveFolder} aria-label="保存文件夹"><Check size={15} /></button><button type="button" onClick={() => setCreatingFolder(false)} aria-label="取消新建文件夹"><X size={15} /></button></div>}
       <div className="asset-folder-list">{[...assetFolders, ...localFolders.map((name) => ({ id: `local-${name}`, name }))].filter((folder) => folder.id !== 'uncategorized').map((folder) => <button type="button" className={category === folder.id ? 'active' : ''} key={folder.id} onClick={() => setCategory(folder.id)}><Folder size={15} /><span>{folder.name}</span><small>{availableEntries.filter((entry) => entry.category === folder.id).length}</small></button>)}</div>
       <div className="asset-results-head"><span>{category === 'all' ? '最近使用' : category === 'favorites' ? '已收藏' : category === 'uncategorized' ? '未分类' : assetFolders.find((folder) => folder.id === category)?.name ?? '我的文件夹'}</span><div role="group" aria-label="资产布局"><button type="button" className={layout === 'grid' ? 'active' : ''} onClick={() => setLayout('grid')} aria-label="网格视图"><Grid3X3 size={15} /></button><button type="button" className={layout === 'list' ? 'active' : ''} onClick={() => setLayout('list')} aria-label="列表视图"><List size={15} /></button></div></div>
-      {entries.length ? <div className={`asset-grid asset-layout-${layout}`}>{entries.map((entry) => { const isFavorite = favorites.has(entry.id) || entry.canvasFavorite; return <article key={entry.id} className="asset-card"><button type="button" className="asset-card-main" onClick={() => entry.sessionAsset ? onAddSessionAsset(entry.sessionAsset) : onAddNode(entry.nodeType, 'asset')}><span className={entry.className} style={entry.posterUrl ? { backgroundImage: `url(${entry.posterUrl})` } : undefined}><em>{entry.type}</em></span><strong>{entry.title}</strong><small>{entry.savedAsset ? '会话资产 · 点击加入画布' : entry.nodeId ? '画布收藏' : '点击加入画布'}</small></button><button type="button" className={`asset-favorite ${isFavorite ? 'active' : ''}`} onClick={() => toggleFavorite(entry.id, entry.nodeId)} aria-label={isFavorite ? `取消收藏${entry.title}` : `收藏${entry.title}`}><Heart size={15} fill={isFavorite ? 'currentColor' : 'none'} /></button></article> })}</div> : <EmptySearch copy="没有匹配的资产" />}
+      {entries.length ? <div className={`asset-grid asset-layout-${layout}`}>{entries.map((entry) => { const isFavorite = favorites.has(entry.id) || entry.canvasFavorite; return <article key={entry.id} className="asset-card"><button type="button" className="asset-card-main" onClick={() => entry.sessionAsset ? onAddSessionAsset(entry.sessionAsset) : onAddNode(entry.nodeType, 'asset')}><span className={entry.className} style={entry.posterUrl ? { backgroundImage: `url(${entry.posterUrl})` } : undefined}><em>{entry.type}</em></span><strong>{entry.title}</strong><small>{entry.savedAsset ? '会话资产 · 点击加入画布' : entry.nodeId ? '画布收藏' : '点击加入画布'}</small></button><button type="button" className={`asset-favorite ${isFavorite ? 'active' : ''}`} onClick={() => toggleFavorite(entry.id, entry.nodeId, entry.resultId)} aria-label={isFavorite ? `取消收藏${entry.title}` : `收藏${entry.title}`}><Heart size={15} fill={isFavorite ? 'currentColor' : 'none'} /></button></article> })}</div> : <EmptySearch copy="没有匹配的资产" />}
     </div>
   )
 }

@@ -215,6 +215,16 @@ export interface MediaMetadata {
   timelineFrameUrls?: string[]
 }
 
+export type MediaVariant = 'dog' | 'anime' | 'ip' | 'audio' | 'poster'
+
+export interface MediaGenerationResult {
+  id: string
+  content: string
+  media: MediaMetadata
+  mediaVariant?: MediaVariant
+  favorite?: boolean
+}
+
 export interface VideoGenerationParams {
   ratio: VideoAspectRatio
   resolution: VideoResolution
@@ -362,8 +372,10 @@ export interface CanvasNodeData extends Record<string, unknown> {
   staleNoticeDismissed?: boolean
   duration?: number
   cost?: number
-  mediaVariant?: 'dog' | 'anime' | 'ip' | 'audio' | 'poster'
+  mediaVariant?: MediaVariant
   media?: MediaMetadata
+  generationResults?: MediaGenerationResult[]
+  primaryGenerationResultId?: string
   pinColor?: PinColor
   favorite?: boolean
   promptHistory?: string[]

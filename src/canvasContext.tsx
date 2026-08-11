@@ -23,6 +23,9 @@ export type CanvasInteractionMode =
 
 interface CanvasActions {
   updateNode: (nodeId: string, patch: Partial<CanvasNodeData>) => void
+  setPrimaryGenerationResult: (nodeId: string, resultId: string) => void
+  setGenerationResultFavorite: (nodeId: string, resultId: string, favorite: boolean) => void
+  canvasPaneClickVersion: number
   changeTextModel: (nodeId: string, modelId: TextModelId, localPrompt: string) => void
   renameNode: (nodeId: string, title: string) => void
   runGeneration: (nodeId: string) => void

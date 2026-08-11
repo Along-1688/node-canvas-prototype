@@ -45,14 +45,6 @@ export interface BuildVideoResultOptions {
   params?: Partial<VideoGenerationParams>
 }
 
-export interface VideoBatchOutputPlan {
-  index: number
-  usesCurrentNode: boolean
-  outputNodeId: string
-  taskId: string
-  outputNodeIds: [string]
-}
-
 const videoModes: Record<VideoGenerationMode, VideoModeRequirement> = {
   'first-frame': {
     mode: 'first-frame',
@@ -209,25 +201,6 @@ export function remapVideoInputRolesForMode(
     if (!role) return edge
     const data: NonNullable<CanvasFlowEdge['data']> = { ...edge.data!, inputRole: role }
     return { ...edge, data }
-  })
-}
-
-export function buildVideoBatchPlan(
-  sourceNodeId: string,
-  count: VideoGenerationParams['count'],
-  fillsCurrentNode: boolean,
-  batchId: string,
-): VideoBatchOutputPlan[] {
-  return Array.from({ length: count }, (_, index) => {
-    const usesCurrentNode = fillsCurrentNode && index === 0
-    const outputNodeId = usesCurrentNode ? sourceNodeId : `video-generated-${batchId}-${index}`
-    return {
-      index,
-      usesCurrentNode,
-      outputNodeId,
-      taskId: `task-${batchId}-${index}`,
-      outputNodeIds: [outputNodeId],
-    }
   })
 }
 

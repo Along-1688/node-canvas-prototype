@@ -20,7 +20,6 @@ export interface ImageEditorWorkspaceProps {
   assets: ImageEditorAsset[]
   /** Images linked to the editor node when this is a new, unsaved project. */
   initialAssets?: ImageEditorAsset[]
-  historyAssets?: ImageEditorAsset[]
   initialComposition?: ImageEditorComposition
   onClose: () => void
   onSave: (payload: ImageEditorCommitPayload) => ImageEditorCommitResult | Promise<ImageEditorCommitResult>

@@ -51,7 +51,6 @@ import {
   FlipHorizontal2,
   FlipVertical2,
   Focus,
-  FolderOpen,
   Image as ImageIcon,
   Italic,
   LoaderCircle,
@@ -101,15 +100,13 @@ export interface ImageEditorWorkspaceProps {
   assets: ImageEditorAsset[]
   /** Upstream images are placed on a new project once, before the user edits it. */
   initialAssets?: ImageEditorAsset[]
-  historyAssets?: ImageEditorAsset[]
   initialComposition?: ImageEditorComposition
   onClose: () => void
   onSave: (payload: ImageEditorCommitPayload) => ImageEditorCommitResult | Promise<ImageEditorCommitResult>
 }
 
 type EditorTool = 'select' | 'brush' | 'eraser' | 'rectangle' | 'arrow' | 'pen' | 'text' | 'upload'
-type RailMode = 'assets' | 'history' | 'shapes' | null
-type AssetLibraryTab = 'all' | 'generated' | 'favorite' | 'uncategorized'
+type RailMode = 'assets' | 'shapes' | null
 type ObjectKind = 'image' | 'generated-image' | 'rectangle' | 'shape' | 'arrow' | 'brush' | 'eraser' | 'pen' | 'text' | 'pose'
 type ExportFormat = 'png' | 'jpeg' | 'psd'
 type PropertyPanel = 'background' | 'fill' | 'stroke' | 'strokeWidth' | 'strokeStyle' | 'opacity' | 'cornerRadius' | 'font' | 'charSpacing' | 'lineHeight' | 'drawColor' | null
@@ -1139,7 +1136,6 @@ export function ImageEditorWorkspace({
   source,
   assets,
   initialAssets = [],
-  historyAssets = [],
   initialComposition,
   onClose,
   onSave,
@@ -1225,7 +1221,6 @@ export function ImageEditorWorkspace({
   const [zoom, setZoom] = useState(1)
   const [panning, setPanning] = useState(false)
   const [railMode, setRailMode] = useState<RailMode>(null)
-  const [assetLibraryTab, setAssetLibraryTab] = useState<AssetLibraryTab>('all')
   const [layers, setLayers] = useState<LayerDescriptor[]>([])
   const [selectionRevision, setSelectionRevision] = useState(0)
   const [historyCursor, setHistoryCursor] = useState({ index: -1, length: 0 })
@@ -1248,7 +1243,6 @@ export function ImageEditorWorkspace({
   const [exportingFormat, setExportingFormat] = useState<ExportFormat | null>(null)
   const [cropMode, setCropMode] = useState(false)
   const [cutoutObjectId, setCutoutObjectId] = useState<string | null>(null)
-  const [historyAssetLimit, setHistoryAssetLimit] = useState(20)
   const [canScrollLayers, setCanScrollLayers] = useState({ up: false, down: false })
   const [layerContextMenu, setLayerContextMenu] = useState<LayerContextMenuState | null>(null)
   const [draggingLayerId, setDraggingLayerId] = useState<string | null>(null)
@@ -1265,16 +1259,6 @@ export function ImageEditorWorkspace({
     ;[...(source ? [source] : []), ...assets].forEach((asset) => deduped.set(asset.id, asset))
     return [...deduped.values()]
   }, [assets, source])
-  const categorizedHistoryAssets = useMemo(() => {
-    const deduped = new Map<string, ImageEditorAsset>()
-    historyAssets.forEach((asset) => deduped.set(asset.id, asset))
-    return [...deduped.values()]
-  }, [historyAssets])
-  const filteredHistoryAssets = assetLibraryTab === 'all'
-    ? categorizedHistoryAssets
-    : categorizedHistoryAssets.filter((asset) => asset.libraryCategory === assetLibraryTab)
-  const visibleHistoryAssets = filteredHistoryAssets.slice(0, historyAssetLimit)
-
   const restoreEntryFocus = useCallback(() => {
     const target = returnFocusRef.current
     if (!target?.isConnected) return
@@ -4004,13 +3988,12 @@ export function ImageEditorWorkspace({
 
       <aside className="image-editor-left-rail" aria-label="图片编辑器侧栏" inert={interfaceLocked} aria-hidden={interfaceLocked || undefined}>
         <button type="button" className={railMode === 'assets' ? 'active' : ''} data-tooltip="画布素材" aria-label="画布素材" onClick={() => setRailMode((current) => current === 'assets' ? null : 'assets')}><ImageIcon size={19} /></button>
-        <button type="button" className={railMode === 'history' ? 'active' : ''} data-tooltip="资产" aria-label="资产" onClick={() => setRailMode((current) => current === 'history' ? null : 'history')}><FolderOpen size={19} /></button>
         <button type="button" className={railMode === 'shapes' ? 'active' : ''} data-tooltip="图形库" aria-label="图形库" onClick={() => setRailMode((current) => current === 'shapes' ? null : 'shapes')}><Shapes size={19} /></button>
         <button type="button" className={poseGeneratorOpen ? 'active' : ''} data-tooltip="姿势生成器" aria-label="姿势生成器" onClick={() => { setRailMode(null); setPoseGeneratorOpen(true) }}><UserRound size={19} /></button>
       </aside>
 
       {showRailPanel && railMode && (
-        <aside className={`image-editor-side-panel rail-${railMode}`} aria-label={railMode === 'assets' ? '画布素材' : railMode === 'history' ? '资产' : '图形库'} inert={interfaceLocked} aria-hidden={interfaceLocked || undefined}>
+        <aside className={`image-editor-side-panel rail-${railMode}`} aria-label={railMode === 'assets' ? '画布素材' : '图形库'} inert={interfaceLocked} aria-hidden={interfaceLocked || undefined}>
           {railMode === 'assets' && (
             <>
               <h2 className="image-editor-side-panel-title">画布中的内容</h2>
@@ -4023,37 +4006,6 @@ export function ImageEditorWorkspace({
                 {!imageAssets.length && <p className="image-editor-empty-assets">暂无可用图片</p>}
               </div>
             </>
-          )}
-          {railMode === 'history' && (
-            <div className="image-editor-history-assets">
-              <div className="image-editor-asset-tabs image-editor-library-tabs" role="tablist" aria-label="图片资产分类">
-                {([
-                  ['all', '全部'],
-                  ['generated', '全部生成'],
-                  ['favorite', '收藏夹'],
-                  ['uncategorized', '未分类'],
-                ] as const).map(([tab, label]) => (
-                  <button
-                    type="button"
-                    key={tab}
-                    role="tab"
-                    aria-selected={assetLibraryTab === tab}
-                    onClick={() => { setAssetLibraryTab(tab); setHistoryAssetLimit(20) }}
-                  >{label}</button>
-                ))}
-              </div>
-              <div className="image-editor-asset-grid">
-                {visibleHistoryAssets.map((asset) => (
-                  <button type="button" key={asset.id} aria-label={`添加资产 ${asset.title}`} data-tooltip={asset.title} onClick={() => void addImage(asset)}>
-                    <img src={asset.src} alt="" loading="lazy" />
-                  </button>
-                ))}
-                {!visibleHistoryAssets.length && <p className="image-editor-empty-assets">暂无可用资产</p>}
-              </div>
-              {historyAssetLimit < filteredHistoryAssets.length && (
-                <button type="button" className="image-editor-history-more" onClick={() => setHistoryAssetLimit((current) => current + 20)}>加载更多</button>
-              )}
-            </div>
           )}
           {railMode === 'shapes' && (
             <div className="image-editor-shape-list">

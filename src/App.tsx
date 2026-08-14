@@ -66,7 +66,7 @@ import { buildStarterExample, starterExamples, type StarterExampleId } from './c
 import { cloneCanvasSnapshot, restoreCanvasSnapshot, type CanvasSnapshot } from './canvasHistory'
 import { CanvasActionContext, type CanvasInteractionMode } from './canvasContext'
 import { areCanvasShortcutsIsolated, isCanvasDeleteShortcutTargetEditing, isCanvasShortcutTargetInteractive, isPlaylistDeleteShortcutTarget } from './canvasShortcuts'
-import { allowedContextSourcesForTarget, allowedTargetsForSource, attachCanvasEdgesToBorders, isConnectionPairAllowed, isSeedanceComplianceEligible, markDirectDependentsStale, markNodesStale, resolveEffectivePrompt, resolveMockPromptMarkerLabel, syncTargetReferences, updateNodeData, validateConnection } from './domain'
+import { allowedContextSourcesForTarget, allowedTargetsForSource, attachCanvasEdgesToBorders, generationInputExceedsLimit, isConnectionPairAllowed, isSeedanceComplianceEligible, markDirectDependentsStale, markNodesStale, resolveEffectivePrompt, resolveMockPromptMarkerLabel, syncTargetReferences, updateNodeData, validateConnection } from './domain'
 import { edgeTypes } from './edges'
 import { AnchoredPopover, useDismissableLayer } from './floating'
 import { ImageEditorWorkspace } from './imageEditor'
@@ -428,8 +428,8 @@ function buildCanvasNode(
 }
 
 /**
- * The editor starts as a dedicated input container. Its linked images stay on
- * the canvas until the user explicitly opens and saves an editor project.
+ * The editor node is created on the canvas before its full-screen workspace
+ * opens, so closing the workspace always returns to a stable canvas object.
  */
 function buildImageEditorNode(
   id: string,
@@ -1634,41 +1634,6 @@ function CanvasPrototype() {
   const imageEditorInitialComposition = imageEditor
     ? imageEditorNode?.data.imageOperation?.editorComposition
     : undefined
-  const imageEditorHistoryAssets = useMemo<ImageEditorAsset[]>(() => {
-    const deduped = new Map<string, ImageEditorAsset>()
-    canvases.forEach((canvas) => {
-      const generatedNodeIds = new Set(canvas.tasks
-        .filter((task) => task.nodeType === 'image' && task.status === 'success')
-        .flatMap((task) => task.outputNodeIds ?? [task.nodeId]))
-      canvas.nodes.forEach((node) => {
-        if (node.data.nodeType !== 'image' || node.data.status !== 'success' || !shouldSyncNodeToAssets(node.data)) return
-        const composition = node.data.imageOperation?.editorComposition
-        const fallbackMedia = (node.data.content ?? '').trim() ? imageMediaForVariant(node.data.mediaVariant) : undefined
-        const media = node.data.media ?? fallbackMedia
-        const src = node.data.media?.url ?? composition?.renderedDataUrl ?? fallbackMedia?.url
-        if (!src) return
-        const libraryCategory = node.data.favorite
-          ? 'favorite'
-          : node.data.sourceKind === 'generated' || generatedNodeIds.has(node.id)
-            ? 'generated'
-            : 'uncategorized'
-        deduped.set(node.id, {
-          id: `editor-history-${node.id}`,
-          sourceNodeId: node.id,
-          title: node.data.title,
-          src,
-          libraryCategory,
-          aspectRatio: media?.width && media.height
-            ? media.width / media.height
-            : composition?.width && composition.height
-              ? composition.width / composition.height
-              : undefined,
-          composition,
-        })
-      })
-    })
-    return [...deduped.values()].reverse()
-  }, [canvases])
   const nodesRef = useRef(nodes)
   const edgesRef = useRef(edges)
   const groupsRef = useRef(groups)
@@ -2231,6 +2196,7 @@ function CanvasPrototype() {
     const canvas = canvasesRef.current.find((item) => item.id === canvasId)
     const source = canvas?.nodes.find((item) => item.id === nodeId)
     if (!canvas || !source || source.data.nodeType !== 'video') return
+    if (!bypassValidation && generationInputExceedsLimit(source.data)) return notify('输入内容达到上限，请精简后再生成')
     const snapshot = buildVideoTaskSnapshot(source.data)
     const complianceAssetIds = source.data.modelId === 'seedance-2' ? source.data.seedanceComplianceAssetIds : undefined
     const validation = validateVideoGenerationInputs(source.data.modeId, source.data.references, source.data.promptAssets, source.data.localPrompt, complianceAssetIds)
@@ -2398,6 +2364,7 @@ function CanvasPrototype() {
     const node = canvas?.nodes.find((item) => item.id === nodeId)
     if (!canvas || !node) return
     const references = node.data.references ?? []
+    if (!bypassValidation && generationInputExceedsLimit(node.data)) return notify('输入内容达到上限，请精简后再生成')
     if (!bypassValidation && references.length === 0 && !(node.data.localPrompt ?? '').trim()) return notify('请输入生成要求或添加参考')
 
     const textModelId = node.data.nodeType === 'text'
@@ -2841,6 +2808,7 @@ function CanvasPrototype() {
     const source = nodesRef.current.find((node) => node.id === nodeId)
     const nextPrompt = prompt.trim()
     if (!source || source.data.nodeType !== 'image') return
+    if (generationInputExceedsLimit(source.data, prompt)) return notify('输入内容达到上限，请精简后再生成')
     const sourceReferences = source.data.references ?? []
     if (!nextPrompt && sourceReferences.length === 0) return notify('请输入图片 Prompt 或添加参考')
     saveHistory()
@@ -3928,7 +3896,8 @@ function CanvasPrototype() {
       setQuickAdd(null)
       setContinuation(null)
       setContextAdd(null)
-      notify(source?.data.nodeType === 'image' ? '图片编辑器已加入画布，并已关联上游图片' : '图片编辑器已加入画布')
+      setImageEditor({ canvasId: activeCanvasId, editorNodeId: editorNode.id, openedAt: Date.now() })
+      notify(source?.data.nodeType === 'image' ? '已创建图片编辑器并关联上游图片' : '已创建图片编辑器')
       return
     }
     saveHistory()
@@ -4926,7 +4895,6 @@ function CanvasPrototype() {
           source={imageEditorSource}
           assets={imageEditorAssets}
           initialAssets={imageEditorInitialAssets}
-          historyAssets={imageEditorHistoryAssets}
           initialComposition={imageEditorInitialComposition}
           onClose={() => {
             setImageEditor(null)

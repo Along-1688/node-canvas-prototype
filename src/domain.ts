@@ -23,6 +23,64 @@ const contextSourceMatrix: Record<MediaNodeType, MediaNodeType[]> = {
   audio: ['text'],
 }
 
+export const GENERATION_INPUT_TOKEN_LIMITS: Record<MediaNodeType, number> = {
+  text: 15_000,
+  image: 1_000,
+  video: 1_000,
+  audio: 1_000,
+}
+
+/**
+ * Deterministic client-side estimate for the interaction prototype.
+ * CJK characters and standalone punctuation count as one token, while
+ * contiguous latin text is approximated at four characters per token.
+ * Production should replace this with the tokenizer returned by the model API.
+ */
+export function estimateTextTokens(value: string) {
+  let tokens = 0
+  let latinRun = 0
+  const flushLatin = () => {
+    if (!latinRun) return
+    tokens += Math.ceil(latinRun / 4)
+    latinRun = 0
+  }
+
+  for (const character of value.normalize('NFC')) {
+    if (/\s/u.test(character)) {
+      if (latinRun) latinRun += 1
+      continue
+    }
+    if (/[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}]/u.test(character)) {
+      flushLatin()
+      tokens += 1
+      continue
+    }
+    if (/[\p{Letter}\p{Number}]/u.test(character)) {
+      latinRun += character.length
+      continue
+    }
+    flushLatin()
+    tokens += 1
+  }
+  flushLatin()
+  return tokens
+}
+
+export function generationInputTokenCount(data: CanvasNodeData, localPrompt = data.localPrompt ?? '') {
+  const referencedText = (data.references ?? [])
+    .filter((reference) => reference.nodeType === 'text')
+    .map((reference) => reference.content)
+  const markerText = (data.promptMarkers ?? []).map((marker) => marker.label)
+  const fixedLyrics = data.nodeType === 'audio' && data.params?.lyricMode === 'fixed' && typeof data.params.lyrics === 'string'
+    ? data.params.lyrics
+    : ''
+  return estimateTextTokens([localPrompt, ...referencedText, ...markerText, fixedLyrics].filter(Boolean).join('\n'))
+}
+
+export function generationInputExceedsLimit(data: CanvasNodeData, localPrompt = data.localPrompt ?? '') {
+  return generationInputTokenCount(data, localPrompt) > GENERATION_INPUT_TOKEN_LIMITS[data.nodeType]
+}
+
 function isImageEditorNode(node: CanvasFlowNode) {
   return node.data.nodeType === 'image'
     && (node.data.imageOperation?.operation === 'image-editor' || node.data.imageOperation?.operation === 'image-compose')

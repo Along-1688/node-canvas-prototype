@@ -45,7 +45,6 @@ export interface ImageEditorAsset {
   sourceNodeId?: string
   title: string
   src: string
-  libraryCategory?: 'generated' | 'favorite' | 'uncategorized'
   aspectRatio?: number
   composition?: ImageEditorComposition
 }

@@ -72,6 +72,7 @@ import {
 } from 'lucide-react'
 import { useCanvasActions, type CanvasInteractionMode } from './canvasContext'
 import { canFavoriteMediaNode, canUploadToEmptyMediaNode } from './assetEligibility'
+import { GENERATION_INPUT_TOKEN_LIMITS, generationInputTokenCount } from './domain'
 import { AnchoredPopover } from './floating'
 import { ImageEditorCompositionPreview } from './imageEditor'
 import { ShinyText } from './ShinyText'
@@ -149,6 +150,21 @@ const pinOptions: Array<{ value?: PinColor; label: string }> = [
   { value: 'blue', label: '蓝色' },
   { value: 'purple', label: '紫色' },
 ]
+
+const generationInputLimitMessage = '输入内容达到上限，请精简后再生成'
+
+function GenerationTokenCount({ count, limit, className = '' }: { count: number; limit: number; className?: string }) {
+  return <span className={`generation-token-count ${className}${count > limit ? ' is-over-limit' : ''}`} aria-live="polite">{count.toLocaleString('en-US')} / {limit.toLocaleString('en-US')}</span>
+}
+
+function GenerationSubmitGuard({ overLimit, children }: { overLimit: boolean; children: ReactNode }) {
+  return <span
+    className={`generation-submit-control${overLimit ? ' is-over-limit ui-tooltip-control' : ''}`}
+    data-tooltip={overLimit ? generationInputLimitMessage : undefined}
+    tabIndex={overLimit ? 0 : undefined}
+    aria-label={overLimit ? generationInputLimitMessage : undefined}
+  >{children}</span>
+}
 
 const operationCopy: Record<ImageOperation, string> = {
   crop: '裁剪',
@@ -853,6 +869,9 @@ export function TextGenerationConfig({ id, data }: { id: string; data: CanvasNod
   const modelButtonRef = useRef<HTMLButtonElement>(null)
   const composingPromptRef = useRef(false)
   const busy = data.status === 'queued' || data.status === 'running'
+  const tokenLimit = GENERATION_INPUT_TOKEN_LIMITS.text
+  const tokenCount = generationInputTokenCount(data, promptDraft)
+  const overLimit = tokenCount > tokenLimit
 
   useEffect(() => {
     if (!composingPromptRef.current) setPromptDraft(data.localPrompt ?? '')
@@ -891,6 +910,7 @@ export function TextGenerationConfig({ id, data }: { id: string; data: CanvasNod
             if (!composingPromptRef.current && promptDraft !== (data.localPrompt ?? '')) commitPrompt(promptDraft)
           }}
         />
+        <GenerationTokenCount count={tokenCount} limit={tokenLimit} />
       </div>
       <footer>
         <button
@@ -937,7 +957,7 @@ export function TextGenerationConfig({ id, data }: { id: string; data: CanvasNod
         <span className="panel-spacer" />
         <button type="button" className="translate-text-action" onClick={() => notify('已翻译提示词（Mock）')} title="翻译提示词" aria-label="翻译提示词"><Languages size={15} /></button>
         <span className="generation-cost"><span className="chestnut-dot" />{data.cost ?? 1}</span>
-        <button type="button" className="generate-button" onClick={() => runGeneration(id)} disabled={busy || (!promptDraft.trim() && !(data.references?.length))} aria-label={busy ? '文本生成中' : '生成文本'}>{busy ? <Pause size={16} /> : <ArrowUp size={17} />}</button>
+        <GenerationSubmitGuard overLimit={overLimit}><button type="button" className="generate-button" onClick={() => runGeneration(id)} disabled={busy || overLimit || (!promptDraft.trim() && !(data.references?.length))} aria-label={busy ? '文本生成中' : '生成文本'}>{busy ? <Pause size={16} /> : <ArrowUp size={17} />}</button></GenerationSubmitGuard>
       </footer>
     </section>
   )
@@ -1404,7 +1424,7 @@ function CameraControlPanel({ value, onChange, onSave }: { value: ImageGeneratio
   )
 }
 
-function GeneratedImagePrompt({ id, data }: { id: string; data: CanvasNodeData }) {
+export function GeneratedImagePrompt({ id, data }: { id: string; data: CanvasNodeData }) {
   const { regenerateImage, notify, updateNode, beginReferenceSelection, beginMarkerSelection, updatePromptMarker, hoverPromptMarker } = useCanvasActions()
   const [draft, setDraft] = useState(data.localPrompt ?? data.promptHistory?.[0] ?? '')
   const [quickReferenceOpen, setQuickReferenceOpen] = useState(false)
@@ -1422,6 +1442,9 @@ function GeneratedImagePrompt({ id, data }: { id: string; data: CanvasNodeData }
   const promptComposerRef = useRef<HTMLDivElement>(null)
   const restorePromptOffsetRef = useRef<number | null>(null)
   const params = data.imageGeneration ?? defaultImageGeneration
+  const tokenLimit = GENERATION_INPUT_TOKEN_LIMITS.image
+  const tokenCount = generationInputTokenCount(data, draft)
+  const overLimit = tokenCount > tokenLimit
   const setParams = (patch: Partial<ImageGenerationParams>) => updateNode(id, { imageGeneration: { ...params, ...patch } })
   useQuickReferenceDismiss(quickReferenceOpen, () => setQuickReferenceOpen(false), promptComposerRef)
 
@@ -1478,7 +1501,7 @@ function GeneratedImagePrompt({ id, data }: { id: string; data: CanvasNodeData }
       <div ref={promptComposerRef} className="image-prompt-composer generation-prompt-composer">
         <PromptAssetTray assets={data.promptAssets} onRemove={(assetId) => updateNode(id, { promptAssets: (data.promptAssets ?? []).filter((asset) => asset.id !== assetId) })} />
         <div ref={promptEditorRef} className={`prompt-rich-editor ${draft.trim() ? '' : 'is-empty'}`} role="textbox" aria-label="图片 Prompt" aria-multiline="true" contentEditable suppressContentEditableWarning onInput={syncPromptEditor}>{promptContent}</div>
-        <span className="video-prompt-count">{draft.length} / 3000</span>
+        <GenerationTokenCount count={tokenCount} limit={tokenLimit} />
         {params.webSearch && <span className="search-mock-badge" title="来源：Node 素材库、公开摄影集、城市光影样例" aria-label="Mock 资料 3 条，来源为 Node 素材库、公开摄影集和城市光影样例"><Globe2 size={12} />Mock 资料 3 条</span>}
         <QuickReferenceMenu open={quickReferenceOpen} onClose={() => setQuickReferenceOpen(false)} onSelect={selectPromptAsset} />
       </div>
@@ -1497,7 +1520,7 @@ function GeneratedImagePrompt({ id, data }: { id: string; data: CanvasNodeData }
         <button type="button" className="generation-icon-toggle ui-tooltip-control" data-tooltip="快捷引用资产" onClick={() => setQuickReferenceOpen(true)} aria-label="快捷引用资产"><span>@</span></button>
         <span className="panel-spacer" />
         <span className="generation-cost"><span className="chestnut-dot" />18</span>
-        <button type="button" className="generate-button" onClick={() => regenerateImage(id, draft, params)} disabled={data.status === 'queued' || data.status === 'running' || (!draft.trim() && !(data.references?.length) && !(data.promptMarkers?.length) && !(data.promptAssets?.length))} aria-label={data.status === 'queued' || data.status === 'running' ? '图片生成中' : '重新生成图片'}><ArrowUp size={17} /></button>
+        <GenerationSubmitGuard overLimit={overLimit}><button type="button" className="generate-button" onClick={() => regenerateImage(id, draft, params)} disabled={overLimit || data.status === 'queued' || data.status === 'running' || (!draft.trim() && !(data.references?.length) && !(data.promptMarkers?.length) && !(data.promptAssets?.length))} aria-label={data.status === 'queued' || data.status === 'running' ? '图片生成中' : '重新生成图片'}><ArrowUp size={17} /></button></GenerationSubmitGuard>
       </footer>
     </section>
   )
@@ -2142,7 +2165,7 @@ function SeedanceLibraryDialog({ data, onClose, onApply }: { data: CanvasNodeDat
   </div>, document.body)
 }
 
-function VideoConfig({ id, data }: { id: string; data: CanvasNodeData }) {
+export function VideoConfig({ id, data }: { id: string; data: CanvasNodeData }) {
   const actions = useCanvasActions() as VideoActionExtensions
   const { updateNode, runGeneration } = actions
   const [quickReferenceOpen, setQuickReferenceOpen] = useState(false)
@@ -2160,6 +2183,9 @@ function VideoConfig({ id, data }: { id: string; data: CanvasNodeData }) {
   const model = videoModelCapabilityFor(data.modelId)
   const availableModes = videoModeOptions.filter((item) => model.supportedModes.includes(item.id))
   const busy = data.status === 'queued' || data.status === 'running'
+  const tokenLimit = GENERATION_INPUT_TOKEN_LIMITS.video
+  const tokenCount = generationInputTokenCount(data)
+  const overLimit = tokenCount > tokenLimit
   const references = data.references ?? []
   const roleReference = (role: VideoReferenceRole) => references.find((item) => (item as NodeReference & { role?: VideoReferenceRole }).role === role)
   const beginRoleReference = (role: VideoReferenceRole) => {
@@ -2199,8 +2225,8 @@ function VideoConfig({ id, data }: { id: string; data: CanvasNodeData }) {
       <div ref={promptComposerRef} className="video-prompt-composer generation-prompt-composer">
         <PromptAssetTray assets={data.promptAssets} onRemove={(assetId) => updateNode(id, { promptAssets: (data.promptAssets ?? []).filter((asset) => asset.id !== assetId) })} />
         <FocusMarkerTray targetId={id} markers={data.promptMarkers} />
-        <textarea maxLength={3000} className="video-prompt" aria-label="视频 Prompt" placeholder="描述镜头、动作、节奏或风格，输入 @ 引用资产" value={data.localPrompt ?? ''} onChange={(event) => { updateNode(id, { localPrompt: event.target.value }); if (event.target.value.endsWith('@')) setQuickReferenceOpen(true) }} />
-        <span className="video-prompt-count">{(data.localPrompt ?? '').length} / 3000</span>
+        <textarea className="video-prompt" aria-label="视频 Prompt" placeholder="描述镜头、动作、节奏或风格，输入 @ 引用资产" value={data.localPrompt ?? ''} onChange={(event) => { updateNode(id, { localPrompt: event.target.value }); if (event.target.value.endsWith('@')) setQuickReferenceOpen(true) }} />
+        <GenerationTokenCount count={tokenCount} limit={tokenLimit} />
         <QuickReferenceMenu open={quickReferenceOpen} onClose={() => setQuickReferenceOpen(false)} onSelect={selectPromptAsset} />
       </div>
       <footer className="video-config-footer generation-config-footer">
@@ -2222,7 +2248,7 @@ function VideoConfig({ id, data }: { id: string; data: CanvasNodeData }) {
         <button type="button" className="video-icon-toggle generation-icon-toggle ui-tooltip-control" data-tooltip="快捷引用资产" onClick={() => setQuickReferenceOpen(true)} aria-label="快捷引用资产"><span>@</span></button>
         <span className="panel-spacer" />
         <span className="generation-cost"><span className="chestnut-dot" />{data.cost ?? 35}</span>
-        <button type="button" className="generate-button" onClick={() => runGeneration(id)} disabled={busy} aria-label={busy ? '视频生成中' : '生成视频'}>{busy ? <Pause size={16} /> : <ArrowUp size={17} />}</button>
+        <GenerationSubmitGuard overLimit={overLimit}><button type="button" className="generate-button" onClick={() => runGeneration(id)} disabled={busy || overLimit} aria-label={busy ? '视频生成中' : '生成视频'}>{busy ? <Pause size={16} /> : <ArrowUp size={17} />}</button></GenerationSubmitGuard>
       </footer>
       {complianceLibraryOpen && <SeedanceLibraryDialog data={data} onClose={() => setComplianceLibraryOpen(false)} onApply={(ids) => updateNode(id, { seedanceComplianceAssetIds: ids })} />}
     </section>
@@ -2825,6 +2851,9 @@ export function AudioConfig({ id, data }: { id: string; data: CanvasNodeData }) 
   const pauseButtonRef = useRef<HTMLButtonElement>(null)
   const toneButtonRef = useRef<HTMLButtonElement>(null)
   const busy = data.status === 'queued' || data.status === 'running'
+  const tokenLimit = GENERATION_INPUT_TOKEN_LIMITS.audio
+  const tokenCount = generationInputTokenCount(data)
+  const overLimit = tokenCount > tokenLimit
   const lyricMode = typeof params.lyricMode === 'string' ? params.lyricMode : 'smart'
   const musicType = typeof params.musicType === 'string' ? params.musicType : 'music'
   const voiceId = typeof params.voiceId === 'string' ? params.voiceId : 'elegant-senior'
@@ -2850,9 +2879,9 @@ export function AudioConfig({ id, data }: { id: string; data: CanvasNodeData }) 
     </div>}
     <div className="audio-prompt-composer">
       {isSpeech && <div className="audio-speech-tokens"><button ref={pauseButtonRef} type="button" onClick={() => { setPauseOpen((open) => !open); setToneOpen(false) }}>停顿</button><button ref={toneButtonRef} type="button" onClick={() => { setToneOpen((open) => !open); setPauseOpen(false) }}>语气词</button><AnchoredPopover anchorRef={pauseButtonRef} open={pauseOpen} onClose={() => setPauseOpen(false)} className="audio-token-menu" align="start" placement="top"><div role="menu" aria-label="选择停顿秒数">{audioPauseOptions.map((seconds) => <button type="button" key={seconds} onClick={() => { appendToken(`[停顿 ${seconds}s]`); setPauseOpen(false) }}>{seconds}s</button>)}</div></AnchoredPopover><AnchoredPopover anchorRef={toneButtonRef} open={toneOpen} onClose={() => setToneOpen(false)} className="audio-tone-menu" align="start" placement="top"><div role="menu" aria-label="选择语气词">{audioToneOptions.map((tone) => <button type="button" key={tone} onClick={() => { appendToken(`[${tone}]`); setToneOpen(false) }}>{tone}</button>)}</div></AnchoredPopover></div>}
-      <textarea maxLength={isMureka ? 1024 : 3000} aria-label="音频生成提示词" placeholder={isMureka ? '输入风格、情绪、乐器等信息来生成音乐' : isSpeech ? '输入要合成的文本，可插入停顿和语气词' : '输入效果提示词和合成文本，支持上传参考音频'} value={data.localPrompt ?? ''} onChange={(event) => updateNode(id, { localPrompt: event.target.value })} />
-      {isMureka && lyricMode === 'fixed' && <textarea maxLength={3000} className="audio-lyrics-input" aria-label="固定歌词" placeholder="在此输入或粘贴歌词…" value={typeof params.lyrics === 'string' ? params.lyrics : ''} onChange={(event) => setParams({ lyrics: event.target.value })} />}
-      <span className="audio-prompt-count">{(data.localPrompt ?? '').length} / {isMureka ? 1024 : 3000}</span>
+      <textarea aria-label="音频生成提示词" placeholder={isMureka ? '输入风格、情绪、乐器等信息来生成音乐' : isSpeech ? '输入要合成的文本，可插入停顿和语气词' : '输入效果提示词和合成文本，支持上传参考音频'} value={data.localPrompt ?? ''} onChange={(event) => updateNode(id, { localPrompt: event.target.value })} />
+      {isMureka && lyricMode === 'fixed' && <textarea className="audio-lyrics-input" aria-label="固定歌词" placeholder="在此输入或粘贴歌词…" value={typeof params.lyrics === 'string' ? params.lyrics : ''} onChange={(event) => setParams({ lyrics: event.target.value })} />}
+      <GenerationTokenCount count={tokenCount} limit={tokenLimit} />
     </div>
     <footer>
       <span className="audio-config-mode">音频生成</span>
@@ -2862,7 +2891,7 @@ export function AudioConfig({ id, data }: { id: string; data: CanvasNodeData }) 
       {!isMureka && <><button ref={settingsButtonRef} type="button" className="audio-settings-trigger" onClick={() => setSettingsOpen((open) => !open)}><SlidersHorizontal size={14} />{isSpeech ? '高级设置' : '设置'}</button><AudioAdvancedSettings anchorRef={settingsButtonRef} open={settingsOpen} onClose={() => setSettingsOpen(false)} params={params} onChange={setParams} /></>}
       <span className="panel-spacer" />
       <span className="generation-cost"><span className="chestnut-dot" />{data.cost ?? 12}</span>
-      <button type="button" className="generate-button" onClick={() => runGeneration(id)} disabled={busy || (!(data.localPrompt ?? '').trim() && !(data.references?.length))} aria-label={busy ? '音频生成中' : '生成音频'}>{busy ? <Pause size={16} /> : <ArrowUp size={17} />}</button>
+      <GenerationSubmitGuard overLimit={overLimit}><button type="button" className="generate-button" onClick={() => runGeneration(id)} disabled={busy || overLimit || (!(data.localPrompt ?? '').trim() && !(data.references?.length))} aria-label={busy ? '音频生成中' : '生成音频'}>{busy ? <Pause size={16} /> : <ArrowUp size={17} />}</button></GenerationSubmitGuard>
     </footer>
     {voicePickerOpen && <VoicePicker value={{ id: voiceId, label: voiceLabel }} onChange={(voice) => setParams({ voiceId: voice.id, voiceLabel: voice.label })} onClose={() => setVoicePickerOpen(false)} />}
   </section>
